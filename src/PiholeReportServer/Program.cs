@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -73,6 +74,19 @@ builder.Services.AddScoped<ReportRunner>();
 builder.Services.AddSingleton<ReportCatalog>();
 
 builder.Services.AddHealthChecks();
+
+// Persist the data protection key ring outside the application directory when a
+// path is configured. Without this, IIS regenerates the keys on every app pool
+// recycle and redeploy, which invalidates the auth cookie and signs every user
+// out. Left unset (development), the framework default applies.
+var keyPath = builder.Configuration["DataProtection:KeyPath"];
+if (!string.IsNullOrWhiteSpace(keyPath))
+{
+    builder.Services
+        .AddDataProtection()
+        .PersistKeysToFileSystem(Directory.CreateDirectory(keyPath))
+        .SetApplicationName("PiholeReportServer");
+}
 
 // Behind IIS or another reverse proxy, honour the forwarded scheme so the
 // OpenID Connect redirect_uri is generated as https and matches the app

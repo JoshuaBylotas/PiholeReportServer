@@ -20,6 +20,24 @@ jobs:
       - name: Restore
         run: dotnet restore
 
+      # dotnet build does NOT parse appsettings.json, so a malformed one ships
+      # happily and then crashes the app at startup behind an opaque HTTP 500.
+      # Parse every settings file here instead. JSON has no comment syntax and
+      # rejects a bare backslash, so "//key" placeholders are fine but Windows
+      # paths in a comment string must use forward slashes or be escaped.
+      - name: Validate settings JSON
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            if python3 -c "import json,sys; json.load(open(sys.argv[1], encoding='utf-8-sig'))" "$f"; then
+              echo "ok   $f"
+            else
+              echo "::error file=$f::Malformed JSON"
+              fail=1
+            fi
+          done < <(find src tests -name 'appsettings*.json' -not -path '*/bin/*' -not -path '*/obj/*')
+          exit $fail
+
       # TreatWarningsAsErrors is on, so this also fails on any NuGet
       # vulnerability advisory (NU1902 / NU1903).
       - name: Build
