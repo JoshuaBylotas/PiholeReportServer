@@ -1,0 +1,95 @@
+@page "/Reports/{id}"
+@model PiholeReportServer.Pages.Reports.RunModel
+@{
+    ViewData["Title"] = Model.Report?.Title ?? "Report";
+}
+
+@if (Model.Report is null)
+{
+    <div class="notice notice-error">That report does not exist.</div>
+    return;
+}
+
+<div class="page-head">
+    <span class="eyebrow">@Model.Report.Category</span>
+    <h1>@Model.Report.Title</h1>
+    <p class="lede">@Model.Report.Summary</p>
+</div>
+
+<form method="post" class="card">
+    <input type="hidden" name="id" value="@Model.Report.Id" />
+
+    @if (Model.Report.Parameters.Count == 0)
+    {
+        <p class="small muted">This report takes no parameters.</p>
+    }
+    else
+    {
+        <div class="field-row">
+            @foreach (var p in Model.Report.Parameters)
+            {
+                var value = Model.Values.TryGetValue(p.Name, out var v) ? v : null;
+                <div class="field">
+                    <label for="p_@p.Name">@p.Label</label>
+
+                    @switch (p.Kind)
+                    {
+                        case ParameterKind.Date:
+                            <input type="date" id="p_@p.Name" name="@p.Name" value="@value" />
+                            break;
+                        case ParameterKind.DateTime:
+                            <input type="datetime-local" id="p_@p.Name" name="@p.Name" value="@value" />
+                            break;
+                        case ParameterKind.Int:
+                            <input type="number" id="p_@p.Name" name="@p.Name" value="@value" />
+                            break;
+                        case ParameterKind.Choice:
+                            <select id="p_@p.Name" name="@p.Name">
+                                @if (!p.Required)
+                                {
+                                    <option value="">(any)</option>
+                                }
+                                @foreach (var choice in p.Choices)
+                                {
+                                    <option value="@choice" selected="@(choice == value)">@choice</option>
+                                }
+                            </select>
+                            break;
+                        default:
+                            <input type="text" id="p_@p.Name" name="@p.Name" value="@value" />
+                            break;
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(p.Help))
+                    {
+                        <span class="help">@p.Help</span>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Run report</button>
+        <button type="submit" class="btn btn-secondary" asp-page-handler="Export">Export CSV</button>
+        <span class="spacer"></span>
+        <a class="btn btn-ghost" href="/Reports">All reports</a>
+    </div>
+</form>
+
+@if (Model.ErrorMessage is not null)
+{
+    <div class="notice notice-error" style="margin-top:1.5rem">
+        <strong>The report could not be run.</strong>
+        @Model.ErrorMessage
+    </div>
+}
+
+@if (Model.Result is not null)
+{
+    <partial name="Shared/_ResultTable" model="Model.Result" />
+}
+else if (Model.HasRun && Model.ErrorMessage is null)
+{
+    <div class="notice notice-info" style="margin-top:1.5rem">No rows matched.</div>
+}

@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PiholeReportServer/PiholeReportServer.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PiholeReportServer.Tests/PiholeReportServer.Tests.csproj" />
+  </Folder>
+</Solution>

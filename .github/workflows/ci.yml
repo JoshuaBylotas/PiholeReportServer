@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      # TreatWarningsAsErrors is on, so this also fails on any NuGet
+      # vulnerability advisory (NU1902 / NU1903).
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test --no-build --configuration Release --verbosity normal
+
+      - name: List vulnerable packages
+        if: always()
+        run: dotnet list package --vulnerable --include-transitive
+
+  boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # This repository is public, so the private/ boundary is a real control
+      # rather than a convention. Fail if anything but the README and the
+      # template is tracked there.
+      - name: Assert private/ contains only committed placeholders
+        run: |
+          tracked=$(git ls-files private/ \
+            | grep -v -E '^private/(README\.md|environment\.template\.md)$' || true)
+          if [ -n "$tracked" ]; then
+            echo "::error::Unexpected tracked files under private/:"
+            echo "$tracked"
+            exit 1
+          fi
+          echo "private/ boundary intact."
+
+      - name: Assert no credentials committed in appsettings
+        run: |
+          if grep -rniE '"(ClientSecret|Password)"[[:space:]]*:[[:space:]]*"[^"<]' \
+               --include='appsettings*.json' src/; then
+            echo "::error::A credential appears to be committed. Use user-secrets or environment variables."
+            exit 1
+          fi
+          echo "No credentials found in appsettings."

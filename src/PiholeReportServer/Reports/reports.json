@@ -1,0 +1,174 @@
+{
+  "reports": [
+    {
+      "id": "top-domains",
+      "title": "Top domains",
+      "summary": "Most frequently queried domains in the window, with how many distinct clients asked for each.",
+      "category": "Traffic",
+      "order": 10,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-7d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" },
+        { "name": "top", "label": "Rows", "kind": "Int", "default": "100" }
+      ]
+    },
+    {
+      "id": "query-volume-daily",
+      "title": "Query volume by day",
+      "summary": "Daily query counts with cache-hit and blocklist-match shares, for spotting trends and outages.",
+      "category": "Traffic",
+      "order": 20,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-30d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" }
+      ]
+    },
+    {
+      "id": "query-volume-hourly",
+      "title": "Query volume by hour of day",
+      "summary": "Average queries per hour-of-day across the window, showing when the network is busiest.",
+      "category": "Traffic",
+      "order": 30,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-14d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" }
+      ]
+    },
+    {
+      "id": "query-types",
+      "title": "Query types",
+      "summary": "Breakdown by DNS record type (A, AAAA, HTTPS, PTR and the rest), resolved through DimType.",
+      "category": "Traffic",
+      "order": 40,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-7d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" }
+      ]
+    },
+    {
+      "id": "status-breakdown",
+      "title": "Status breakdown",
+      "summary": "How queries were answered - forwarded, served from cache, or matched against a blocklist.",
+      "category": "Traffic",
+      "order": 50,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-7d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" }
+      ]
+    },
+    {
+      "id": "top-clients",
+      "title": "Top clients",
+      "summary": "Busiest clients resolved to host name, MAC and vendor, with their distinct-domain footprint.",
+      "category": "Clients",
+      "order": 10,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-7d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" },
+        { "name": "top", "label": "Rows", "kind": "Int", "default": "100" }
+      ]
+    },
+    {
+      "id": "client-detail",
+      "title": "Single client detail",
+      "summary": "Every domain one client asked for in the window, ranked by volume.",
+      "category": "Clients",
+      "order": 20,
+      "parameters": [
+        { "name": "client", "label": "Client IP", "kind": "Text", "help": "Exact IP, e.g. 192.0.2.122" },
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-24h" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" },
+        { "name": "top", "label": "Rows", "kind": "Int", "default": "200" }
+      ]
+    },
+    {
+      "id": "new-domains",
+      "title": "Newly seen domains",
+      "summary": "Domains whose very first appearance anywhere in the warehouse falls inside the window - useful for spotting new services or beaconing.",
+      "category": "Clients",
+      "order": 30,
+      "parameters": [
+        { "name": "from", "label": "First seen after", "kind": "DateTime", "default": "-24h" },
+        { "name": "to", "label": "First seen before", "kind": "DateTime", "default": "now" },
+        { "name": "top", "label": "Rows", "kind": "Int", "default": "200" }
+      ]
+    },
+    {
+      "id": "would-be-blocked",
+      "title": "Would-be-blocked domains",
+      "summary": "Queries that were answered normally but whose domain sits on a blocklist. This is the report that matters while Pi-hole blocking is switched off.",
+      "category": "Blocking",
+      "order": 10,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-7d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" },
+        { "name": "top", "label": "Rows", "kind": "Int", "default": "200" }
+      ]
+    },
+    {
+      "id": "blocklist-effectiveness",
+      "title": "Blocklist effectiveness",
+      "summary": "Which subscribed blocklist would have caught the most traffic, and how many of its domains were ever actually queried.",
+      "category": "Blocking",
+      "order": 20,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-30d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" }
+      ]
+    },
+    {
+      "id": "would-be-blocked-by-client",
+      "title": "Would-be-blocked by client",
+      "summary": "Which devices generate the most blocklist-matching traffic, as a share of everything they ask for.",
+      "category": "Blocking",
+      "order": 30,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-7d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" }
+      ]
+    },
+    {
+      "id": "upstream-forwarders",
+      "title": "Upstream resolvers",
+      "summary": "Where forwarded queries went, with reply-time percentiles per upstream.",
+      "category": "Performance",
+      "order": 10,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-7d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" }
+      ]
+    },
+    {
+      "id": "slowest-domains",
+      "title": "Slowest domains",
+      "summary": "Domains with the worst average upstream reply time, restricted to those queried often enough to be meaningful.",
+      "category": "Performance",
+      "order": 20,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-7d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" },
+        { "name": "minQueries", "label": "Min queries", "kind": "Int", "default": "20" },
+        { "name": "top", "label": "Rows", "kind": "Int", "default": "100" }
+      ]
+    },
+    {
+      "id": "malformed-domains",
+      "title": "Malformed domain names",
+      "summary": "Rows whose domain is not a valid host name - non-UTF-8 bytes substituted at load time, embedded ports, or stray labels. A data-quality and client-misbehaviour check.",
+      "category": "Data quality",
+      "order": 10,
+      "parameters": [
+        { "name": "from", "label": "From", "kind": "DateTime", "default": "-30d" },
+        { "name": "to", "label": "To", "kind": "DateTime", "default": "now" }
+      ]
+    },
+    {
+      "id": "ingest-freshness",
+      "title": "Ingest freshness",
+      "summary": "How current the warehouse is, and whether the streaming loader has left any gaps in the last few days.",
+      "category": "Data quality",
+      "order": 20,
+      "parameters": []
+    }
+  ]
+}

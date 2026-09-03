@@ -1,0 +1,121 @@
+@page
+@model PiholeReportServer.Pages.IndexModel
+@{
+    ViewData["Title"] = "Overview";
+}
+
+<div class="page-head">
+    <span class="eyebrow">DNS query warehouse</span>
+    <h1>Reporting over your Pi&#8209;hole history</h1>
+    <p class="lede">
+        Every DNS query Pi&#8209;hole has logged, streamed into SQL Server and kept
+        queryable long after Pi&#8209;hole&#8217;s own retention window has rolled over.
+        Start from a pre&#8209;canned report, or build your own.
+    </p>
+</div>
+
+@if (Model.LoadError is not null)
+{
+    <div class="notice notice-error">
+        <strong>The report database could not be reached.</strong>
+        @Model.LoadError
+        <div style="margin-top:.5rem">
+            Check <a href="/Diagnostics">Diagnostics</a> for the effective SQL identity and
+            connection settings.
+        </div>
+    </div>
+}
+else
+{
+    <div class="stat-strip">
+        <div class="stat">
+            <div class="value">@Model.TotalQueries.ToString("N0")</div>
+            <div class="label">Queries stored</div>
+        </div>
+        <div class="stat">
+            <div class="value">@Model.DistinctDomains.ToString("N0")</div>
+            <div class="label">Distinct domains, last 7 days</div>
+        </div>
+        <div class="stat">
+            <div class="value">@Model.DistinctClients.ToString("N0")</div>
+            <div class="label">Active clients, last 7 days</div>
+        </div>
+        <div class="stat">
+            <div class="value">
+                @(Model.NewestQuery is null ? "—" : Model.NewestQuery.Value.ToString("MMM d, HH:mm"))
+            </div>
+            <div class="label">Most recent query (UTC)</div>
+        </div>
+    </div>
+
+    @if (Model.OldestQuery is not null && Model.NewestQuery is not null)
+    {
+        <p class="small muted" style="margin-top:-1rem;margin-bottom:2rem">
+            Coverage: @Model.OldestQuery.Value.ToString("yyyy-MM-dd") through
+            @Model.NewestQuery.Value.ToString("yyyy-MM-dd")
+            (@((Model.NewestQuery.Value - Model.OldestQuery.Value).Days.ToString("N0")) days).
+            All timestamps are UTC.
+        </p>
+    }
+}
+
+<div class="card-grid">
+    <a class="card" href="/Reports">
+        <span class="icon-tile" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 3v18h18" /><path d="M7 16v-5" /><path d="M12 16V8" /><path d="M17 16v-3" />
+            </svg>
+        </span>
+        <h3>Pre&#8209;canned reports</h3>
+        <p>
+            @Model.ReportCount ready-made report@(Model.ReportCount == 1 ? "" : "s") covering traffic,
+            clients, blocking and data quality. Pick a date range and run.
+        </p>
+    </a>
+
+    <a class="card" href="/Query/Builder">
+        <span class="icon-tile" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 6h16" /><path d="M7 12h10" /><path d="M10 18h4" />
+            </svg>
+        </span>
+        <h3>Report builder</h3>
+        <p>
+            Choose a dimension, a metric and filters. No SQL required, and safe for
+            anyone with access &mdash; every fragment is chosen from a fixed list.
+        </p>
+    </a>
+
+    @if (User.IsInRole(AppRoles.SqlAuthor))
+    {
+        <a class="card" href="/Query/Sql">
+            <span class="icon-tile" aria-hidden="true">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="8 6 3 12 8 18" /><polyline points="16 6 21 12 16 18" />
+                </svg>
+            </span>
+            <h3>SQL console</h3>
+            <p>
+                Free-text <code>SELECT</code> against the warehouse, read-only and row-capped.
+                Restricted to the <span class="mono">Report.SqlAuthor</span> role.
+            </p>
+        </a>
+    }
+
+    <a class="card" href="/Diagnostics">
+        <span class="icon-tile" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="9" /><path d="M12 8v4" /><path d="M12 16h.01" />
+            </svg>
+        </span>
+        <h3>Diagnostics</h3>
+        <p>
+            Who you are signed in as, which SQL identity the app is using, and whether
+            the warehouse tables and dimensions are present.
+        </p>
+    </a>
+</div>

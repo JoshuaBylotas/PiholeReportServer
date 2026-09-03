@@ -1,0 +1,104 @@
+@page
+@model PiholeReportServer.Pages.Query.BuilderModel
+@using static PiholeReportServer.Models.BuilderSpec
+@{
+    ViewData["Title"] = "Report builder";
+}
+
+<div class="page-head">
+    <span class="eyebrow">Custom</span>
+    <h1>Report builder</h1>
+    <p class="lede">
+        Pick what to group by, what to measure, and how to filter. The SQL is assembled
+        from a fixed set of fragments &mdash; your filter text travels as a bound
+        parameter, never as SQL &mdash; so this page is safe for anyone with access.
+    </p>
+</div>
+
+<form method="post" class="card">
+    <div class="field-row">
+        <div class="field">
+            <label asp-for="Spec.From">From (UTC)</label>
+            <input asp-for="Spec.From" type="datetime-local" />
+        </div>
+        <div class="field">
+            <label asp-for="Spec.To">To (UTC)</label>
+            <input asp-for="Spec.To" type="datetime-local" />
+        </div>
+        <div class="field">
+            <label asp-for="Spec.GroupBy">Group by</label>
+            <select asp-for="Spec.GroupBy" asp-items="Html.GetEnumSelectList<GroupDimension>()"></select>
+        </div>
+        <div class="field">
+            <label asp-for="Spec.ThenBy">Then by</label>
+            <select asp-for="Spec.ThenBy" asp-items="Html.GetEnumSelectList<GroupDimension>()"></select>
+        </div>
+        <div class="field">
+            <label asp-for="Spec.Metric">Metric</label>
+            <select asp-for="Spec.Metric" asp-items="Html.GetEnumSelectList<MetricKind>()"></select>
+        </div>
+    </div>
+
+    <div class="field-row" style="margin-top:1rem">
+        <div class="field">
+            <label asp-for="Spec.DomainFilter">Domain contains</label>
+            <input asp-for="Spec.DomainFilter" type="text" placeholder="e.g. doubleclick" />
+        </div>
+        <div class="field">
+            <label asp-for="Spec.ClientFilter">Client IP contains</label>
+            <input asp-for="Spec.ClientFilter" type="text" placeholder="e.g. 192.0.2." />
+        </div>
+        <div class="field">
+            <label asp-for="Spec.StatusFilter">Status code</label>
+            <input asp-for="Spec.StatusFilter" type="number" placeholder="any" />
+            <span class="help">2 = forwarded, 3 = cache, 1 = gravity</span>
+        </div>
+        <div class="field">
+            <label asp-for="Spec.TypeFilter">Query type</label>
+            <input asp-for="Spec.TypeFilter" type="number" placeholder="any" />
+            <span class="help">1 = A, 28 = AAAA, 65 = HTTPS</span>
+        </div>
+        <div class="field">
+            <label asp-for="Spec.Sort">Sort</label>
+            <select asp-for="Spec.Sort" asp-items="Html.GetEnumSelectList<SortDirection>()"></select>
+        </div>
+        <div class="field">
+            <label asp-for="Spec.Limit">Row limit</label>
+            <input asp-for="Spec.Limit" type="number" min="1" max="100000" />
+        </div>
+    </div>
+
+    <div class="checkline" style="margin-top:1rem">
+        <input asp-for="Spec.OnlyBlocklisted" type="checkbox" />
+        <label asp-for="Spec.OnlyBlocklisted">Only domains that appear on a blocklist</label>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Run query</button>
+        <button type="submit" class="btn btn-secondary" asp-page-handler="Export">Export CSV</button>
+    </div>
+
+    <div asp-validation-summary="All" class="notice notice-error" style="margin-top:1rem"></div>
+</form>
+
+@if (Model.ErrorMessage is not null)
+{
+    <div class="notice notice-error" style="margin-top:1.5rem">
+        <strong>The query failed.</strong> @Model.ErrorMessage
+    </div>
+}
+
+@if (Model.Result is not null)
+{
+    <partial name="Shared/_ResultTable" model="Model.Result" />
+}
+
+@if (Model.GeneratedSql is not null)
+{
+    <details style="margin-top:1.5rem">
+        <summary class="small muted" style="cursor:pointer">Show the generated SQL</summary>
+        <div class="table-wrap" style="margin-top:.75rem;padding:1rem">
+            <pre style="margin:0;white-space:pre-wrap">@Model.GeneratedSql</pre>
+        </div>
+    </details>
+}

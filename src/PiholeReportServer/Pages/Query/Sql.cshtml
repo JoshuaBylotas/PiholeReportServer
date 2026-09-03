@@ -1,0 +1,104 @@
+@page
+@model PiholeReportServer.Pages.Query.SqlModel
+@{
+    ViewData["Title"] = "SQL console";
+}
+
+<div class="page-head">
+    <span class="eyebrow">Restricted</span>
+    <h1>SQL console</h1>
+    <p class="lede">
+        Free-text <code>SELECT</code> against the warehouse. Reads only: the application
+        connects with a login that holds nothing but <code>db_datareader</code>, results
+        are capped at @Model.MaxRows.ToString("N0") rows, and statements are screened
+        before they run.
+    </p>
+</div>
+
+@if (!Model.Enabled)
+{
+    <div class="notice notice-warn">
+        <strong>The SQL console is switched off.</strong>
+        Set <code>Reporting:EnableRawSql</code> to <code>true</code> to enable it.
+    </div>
+}
+
+<form method="post" class="card">
+    <div class="field">
+        <label asp-for="Sql">Query</label>
+        <textarea asp-for="Sql" class="sql" spellcheck="false"
+                  placeholder="SELECT TOP (100) * FROM dbo.PiholeQueries ORDER BY ts DESC"></textarea>
+        <span class="help">
+            One statement, beginning with <code>SELECT</code> or <code>WITH</code>.
+            Add <code>TOP (n)</code> to keep large scans cheap.
+        </span>
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary" disabled="@(!Model.Enabled)">Run query</button>
+        <button type="submit" class="btn btn-secondary" asp-page-handler="Export"
+                disabled="@(!Model.Enabled)">Export CSV</button>
+        <span class="spacer"></span>
+        <a class="btn btn-ghost" href="/Query/Builder">Use the builder instead</a>
+    </div>
+</form>
+
+@if (Model.ErrorMessage is not null)
+{
+    <div class="notice @(Model.Rejected ? "notice-warn" : "notice-error")" style="margin-top:1.5rem">
+        <strong>@(Model.Rejected ? "Query rejected." : "Query failed.")</strong>
+        @Model.ErrorMessage
+    </div>
+}
+
+@if (Model.Result is not null)
+{
+    <partial name="Shared/_ResultTable" model="Model.Result" />
+}
+
+<div class="card" style="margin-top:2rem">
+    <h3>Schema reference</h3>
+    <p style="margin-bottom:.75rem">
+        The fact table is <code>dbo.PiholeQueries</code>, one row per DNS query, keyed on
+        Pi&#8209;hole FTL&#8217;s own <code>id</code>.
+    </p>
+    <div class="table-wrap">
+        <table class="data">
+            <thead>
+                <tr><th>Object</th><th>Key columns</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>dbo.PiholeQueries</code></td>
+                    <td class="mono">id, ts, type, status, status_text, domain, client, forward, reply_type, reply_time, dnssec, ede</td>
+                    <td><code>ts</code> is UTC. <code>reply_time</code> is seconds.</td>
+                </tr>
+                <tr>
+                    <td><code>dbo.DimClient</code></td>
+                    <td class="mono">ip, hostname, mac, vendor, interface</td>
+                    <td>Join on <code>DimClient.ip = PiholeQueries.client</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>dbo.DimType</code></td>
+                    <td class="mono">type, type_text</td>
+                    <td>Decodes FTL&#8217;s <em>OTHER</em> as 100 + qtype.</td>
+                </tr>
+                <tr>
+                    <td><code>dbo.DimStatus</code></td>
+                    <td class="mono">status, status_text</td>
+                    <td>Join on <code>DimStatus.status = PiholeQueries.status</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>dbo.GravityDomains</code></td>
+                    <td class="mono">domain, adlist_id</td>
+                    <td>Blocklist membership bridge, indexed on <code>domain</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>dbo.Adlists</code></td>
+                    <td class="mono">id, address, comment</td>
+                    <td>Join on <code>Adlists.id = GravityDomains.adlist_id</code>.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>

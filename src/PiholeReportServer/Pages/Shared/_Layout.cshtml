@@ -1,0 +1,77 @@
+@using System.Security.Claims
+@using Microsoft.Extensions.Options
+@using PiholeReportServer.Configuration
+@inject IOptions<ReportingOptions> ReportingOpts
+@{
+    var reporting = ReportingOpts.Value;
+    var canRunSql = reporting.EnableRawSql && User.IsInRole(AppRoles.SqlAuthor);
+    var displayName = User.FindFirst("name")?.Value
+                      ?? User.FindFirst(ClaimTypes.Name)?.Value
+                      ?? User.FindFirst("preferred_username")?.Value
+                      ?? "Signed in";
+
+    string ActiveIf(string prefix)
+    {
+        var path = ViewContext.HttpContext.Request.Path.Value ?? "/";
+        return prefix == "/"
+            ? (path == "/" ? "active" : "")
+            : (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ? "active" : "");
+    }
+}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>@(ViewData["Title"] is null ? "Pi-hole Report Server" : ViewData["Title"] + " — Pi-hole Report Server")</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Fraunces:opsz,wght@9..144,500;9..144,600&amp;display=swap" />
+    <link rel="stylesheet" href="~/css/theme.css" asp-append-version="true" />
+</head>
+<body>
+    <header class="site-header">
+        <div class="shell bar">
+            <a href="/" class="wordmark" aria-label="Pi-hole Report Server home">
+                <span class="mark" aria-hidden="true">&#9679;</span>
+                <span>Pi&#8209;hole</span>
+                <span class="sub">Report Server</span>
+            </a>
+
+            @if (User.Identity?.IsAuthenticated == true)
+            {
+                <nav class="site-nav">
+                    <a class="nav-pill @ActiveIf("/")" href="/">Overview</a>
+                    <a class="nav-pill @ActiveIf("/Reports")" href="/Reports">Reports</a>
+                    <a class="nav-pill @ActiveIf("/Query/Builder")" href="/Query/Builder">Builder</a>
+                    @if (canRunSql)
+                    {
+                        <a class="nav-pill @ActiveIf("/Query/Sql")" href="/Query/Sql">SQL</a>
+                    }
+                    <a class="nav-pill @ActiveIf("/Diagnostics")" href="/Diagnostics">Diagnostics</a>
+                    <span class="spacer"></span>
+                    <span class="badge badge-pine nowrap" title="@displayName">@displayName</span>
+                    <a class="nav-pill"
+                       asp-area="MicrosoftIdentity" asp-controller="Account" asp-action="SignOut">Sign out</a>
+                </nav>
+            }
+        </div>
+    </header>
+
+    <main class="shell">
+        @RenderBody()
+    </main>
+
+    <footer class="site-footer">
+        <div class="shell row">
+            <span>Pi&#8209;hole Report Server &mdash; reporting over the DNS query warehouse.</span>
+            <span class="spacer"></span>
+            <span>Secured by Microsoft Entra ID</span>
+        </div>
+    </footer>
+
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

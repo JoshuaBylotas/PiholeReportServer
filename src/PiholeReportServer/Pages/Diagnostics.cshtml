@@ -1,0 +1,111 @@
+@page
+@model PiholeReportServer.Pages.DiagnosticsModel
+@{
+    ViewData["Title"] = "Diagnostics";
+}
+
+<div class="page-head">
+    <span class="eyebrow">Health</span>
+    <h1>Diagnostics</h1>
+    <p class="lede">
+        What the application sees: your Entra ID session, the identity it presents to
+        SQL Server, and whether the warehouse objects are in place.
+    </p>
+</div>
+
+<div class="card-grid">
+    <div class="card">
+        <h3>Your session</h3>
+        <div class="table-wrap" style="margin-top:.75rem">
+            <table class="data">
+                <tbody>
+                    @foreach (var claim in Model.InterestingClaims)
+                    {
+                        <tr>
+                            <td class="mono nowrap">@claim.Type.Split('/').Last()</td>
+                            <td>@claim.Value</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (!Model.InterestingClaims.Any(c => c.Type is "roles" or System.Security.Claims.ClaimTypes.Role))
+        {
+            <p class="small muted" style="margin-top:.75rem">
+                No app roles are present on this token. Assign <code>Report.Viewer</code> or
+                <code>Report.SqlAuthor</code> in Entra ID to use role-based gating &mdash;
+                see <code>docs/02-entra-id-setup.md</code>.
+            </p>
+        }
+    </div>
+
+    <div class="card">
+        <h3>SQL connection</h3>
+        <div class="table-wrap" style="margin-top:.75rem">
+            <table class="data">
+                <tbody>
+                    <tr><td class="mono nowrap">server</td><td>@Model.Server</td></tr>
+                    <tr><td class="mono nowrap">database</td><td>@Model.Database</td></tr>
+                    <tr><td class="mono nowrap">auth mode</td><td>@Model.AuthMode</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        @if (Model.SqlIdentity is not null)
+        {
+            <p class="small" style="margin-top:.75rem"><code>@Model.SqlIdentity</code></p>
+        }
+        @if (Model.SqlError is not null)
+        {
+            <div class="notice notice-error" style="margin-top:.75rem;margin-bottom:0">
+                @Model.SqlError
+            </div>
+        }
+    </div>
+</div>
+
+<div class="category-head">
+    <h2>Warehouse objects</h2>
+    <span class="rule"></span>
+</div>
+
+@if (Model.Objects.Count == 0)
+{
+    <div class="notice notice-warn">
+        Object inventory unavailable &mdash; the database could not be queried.
+    </div>
+}
+else
+{
+    <div class="table-wrap">
+        <table class="data">
+            <thead>
+                <tr><th>Object</th><th class="num">Rows</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var (name, count) in Model.Objects)
+                {
+                    <tr>
+                        <td class="mono">@name</td>
+                        <td class="num">@(count?.ToString("N0") ?? "—")</td>
+                        <td>
+                            @if (count is null)
+                            {
+                                <span class="badge badge-gold">Missing</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-pine">Present</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <p class="small muted" style="margin-top:.75rem">
+        Row counts come from <code>sys.dm_db_partition_stats</code>, so they are near-exact
+        rather than a full <code>COUNT(*)</code> over 23M+ rows. A missing dimension table
+        means <code>dims.py</code> has not run &mdash; see <code>docs/05-pihole-sqlsync.md</code>.
+    </p>
+}

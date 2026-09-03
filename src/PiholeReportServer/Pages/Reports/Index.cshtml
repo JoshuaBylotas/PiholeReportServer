@@ -1,0 +1,49 @@
+@page "/Reports"
+@model PiholeReportServer.Pages.Reports.IndexModel
+@{
+    ViewData["Title"] = "Reports";
+}
+
+<div class="page-head">
+    <span class="eyebrow">Pre&#8209;canned</span>
+    <h1>Reports</h1>
+    <p class="lede">
+        Ready-made queries over the warehouse. Each one opens with a sensible default
+        date range that you can change before running, and every result can be exported
+        to CSV.
+    </p>
+</div>
+
+@if (Model.Categories.Count == 0)
+{
+    <div class="notice notice-warn">
+        <strong>No report definitions were loaded.</strong>
+        Check that <code>Reports/reports.json</code> and its <code>.sql</code> files were
+        deployed alongside the application.
+    </div>
+}
+
+@foreach (var category in Model.Categories)
+{
+    <div class="category-head">
+        <h2>@category.Key</h2>
+        <span class="rule"></span>
+        <span class="small muted">@category.Count() report@(category.Count() == 1 ? "" : "s")</span>
+    </div>
+
+    <div class="card-grid">
+        @foreach (var report in category)
+        {
+            <a class="card" href="/Reports/@report.Id">
+                <h3>@report.Title</h3>
+                <p>@report.Summary</p>
+                @if (report.Parameters.Count > 0)
+                {
+                    <p class="small muted" style="margin-top:.75rem">
+                        Parameters: @string.Join(", ", report.Parameters.Select(p => p.Label))
+                    </p>
+                }
+            </a>
+        }
+    </div>
+}

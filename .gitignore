@@ -1,0 +1,57 @@
+## ─────────────────────────────────────────────────────────────
+##  PRIVATE ENVIRONMENT DATA — never commit
+##  This repository is PUBLIC. Anything describing the real
+##  network (host names, IPs, tenant/client IDs, credentials)
+##  lives in private/ and must stay out of git history.
+## ─────────────────────────────────────────────────────────────
+# Ignore the CONTENTS of private/, not the directory itself: git does not
+# descend into an ignored directory, so a negation inside "private/" would
+# never be reached. "private/*" leaves the directory walkable.
+private/*
+!private/README.md
+!private/environment.template.md
+
+# Secrets, certs, local overrides
+*.env
+.env*
+appsettings.Local.json
+appsettings.*.Local.json
+secrets.json
+*.pfx
+*.p12
+*.key
+*.pem
+*.publishsettings
+*.pubxml.user
+
+## ── .NET ────────────────────────────────────────────────────
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+artifacts/
+TestResults/
+coverage/
+*.coverage
+*.trx
+
+## ── Node (only if the optional Tailwind build is used) ──────
+node_modules/
+npm-debug.log*
+.tailwindcss-cache
+
+## ── Editors / OS ───────────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/

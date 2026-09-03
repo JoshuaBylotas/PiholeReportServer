@@ -1,0 +1,29 @@
+@page
+@model PiholeReportServer.Pages.ErrorModel
+@{
+    ViewData["Title"] = "Error";
+}
+
+<div class="gate">
+    <span class="icon-tile" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 9v4" /><path d="M12 17h.01" />
+            <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+        </svg>
+    </span>
+    <h1>Something went wrong</h1>
+    <p class="lede" style="margin-inline:auto">
+        The request could not be completed. If it keeps happening, quote the request id
+        below when reporting it.
+    </p>
+
+    @if (Model.RequestId is not null)
+    {
+        <p class="small mono muted" style="margin-top:1rem">@Model.RequestId</p>
+    }
+
+    <div class="form-actions" style="justify-content:center">
+        <a class="btn btn-primary" href="/">Back to overview</a>
+    </div>
+</div>
