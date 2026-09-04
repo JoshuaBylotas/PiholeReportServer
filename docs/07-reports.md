@@ -99,9 +99,9 @@ any signed-in user.
 
 | Control | Options |
 |---------|---------|
-| **Group by** / **Then by** | Domain, Client, Client hostname, Query type, Status, Upstream, Hour, Day, Week |
+| **Group by** / **Then by** | Domain, Client, Client hostname, Query type, Status, Upstream, **Blocklist**, Hour, Day, Week |
 | **Metric** | Query count, Distinct domains, Distinct clients, Avg reply ms, Max reply ms |
-| **Filters** | Date range, domain contains, client IP contains, status code, query type, only-blocklisted |
+| **Filters** | Date range, domain contains, client IP contains, **clients** (multi-select), **blocklists** (multi-select), status code, query type |
 | **Sort / Limit** | Ascending or descending; row limit clamped to `Reporting:MaxRows` |
 
 Expand **Show the generated SQL** to see what it built — useful as a starting point for
@@ -116,6 +116,64 @@ Two safety properties worth knowing, because they are what make this page unrest
 
 Joins are added only when the chosen dimensions need them, so the common "top domains"
 shape stays a single-table scan.
+
+### The two multi-selects
+
+**Clients** lists devices from `dbo.DimClient`. The options show the device name but
+their *values* are IPs, because that is what the fact table stores, what is indexed, and
+because one host name can cover several addresses.
+
+**Blocklists** lists the subscribed lists from `dbo.Adlists`, labelled by their comment
+and domain count. Three states:
+
+| Selection | Meaning |
+|-----------|---------|
+| nothing | No blocklist filter |
+| `(any blocklist)` | On any subscribed list — what the old checkbox meant |
+| one or more lists | Only traffic those specific lists would have caught |
+
+`(any blocklist)` takes precedence over specific selections, because selecting it is a
+*wider* request and must not be silently narrowed.
+
+### Attributing traffic to a list
+
+Pair the blocklist filter with **Group by → Blocklist** to see which list catches what.
+
+One caveat the page states in-line: `dbo.GravityDomains` holds one row per
+(domain, adlist) pair, so grouping by blocklist **counts each query once per matching
+list**. A domain on three lists contributes to all three. Each per-list total is correct,
+but their sum exceeds the total query count. That fan-out is precisely what makes the
+question answerable — it is not an error.
+
+The *filter* does not fan out: it uses `EXISTS` with its own alias, so filtering by list
+never inflates counts.
+
+---
+
+## Saved reports
+
+Anything you build in the builder, or write in the SQL console, can be saved to your own
+account and re-run later. Saved reports appear on the **Reports** index alongside the
+pre-canned library, and on the page that created them.
+
+| | |
+|---|---|
+| Where | `dbo.SavedReports` — see [SQL Server setup](03-sql-server-setup.md#saved-reports-table) |
+| Scope | **Yours only.** Every query filters on your Entra object id |
+| Naming | Saving under an existing name **replaces** it |
+| Limit | 200 per user |
+
+Two details worth knowing:
+
+- **Ownership is keyed on the Entra `oid` claim, not the UPN.** An `oid` is immutable, so
+  renaming an account does not orphan its saved reports.
+- **Builder specs store enum values by name, not ordinal.** An ordinal would silently
+  re-point at a different column the moment a new dimension was inserted mid-enum, and
+  every saved report would quietly start reporting on something else.
+
+A saved SQL query is screened by `SqlGuard` both when saved and again on every run — so a
+query stored before a schema change fails cleanly rather than silently returning the
+wrong thing.
 
 ---
 

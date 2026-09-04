@@ -48,6 +48,22 @@ Then browse to <https://localhost:7443>. You should be redirected straight to a
 Microsoft sign-in page — the whole site sits behind the Entra ID gate, with the sole
 exception of `/healthz`.
 
+## Validating report SQL
+
+Neither `dotnet build` nor the unit tests can see the database schema, and report SQL
+ships as content — so a wrong column name compiles, passes CI, and fails only when
+somebody opens that report. After changing any report SQL, or after a loader schema
+change, run:
+
+```powershell
+.	ools\Validate-ReportSql.ps1 -Server <SQL_HOST>
+```
+
+It binds every pre-canned report and every builder permutation with
+`sys.sp_describe_first_result_set` — a full parse and bind with no execution, so it is
+safe and fast against a table with tens of millions of rows. Run `dotnet test` first: a
+test dumps the builder permutations for the script to pick up.
+
 ## Conventions used in these documents
 
 | Placeholder | Meaning |

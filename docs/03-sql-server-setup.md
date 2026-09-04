@@ -301,6 +301,37 @@ REVERT;
 GO
 ```
 
+### Saved reports table
+
+The one object the application writes to. Create it with the idempotent script:
+
+```powershell
+sqlcmd -S <SQL_HOST> -E -C -d <SQL_DB> -i tools\schema\SavedReports.sql
+```
+
+That script also issues the grant, and the grant is the point:
+
+```sql
+GRANT SELECT, INSERT, UPDATE, DELETE ON dbo.SavedReports TO pihole_report_ro;
+```
+
+**Table-scoped, deliberately not `db_datawriter`.** Making the login a writer would give
+it write access to the whole warehouse and dismantle the argument the SQL console rests
+on — that even a statement defeating `SqlGuard` cannot change anything. With this grant,
+the worst a defeated guard could do is edit saved-report rows.
+
+Ownership is keyed on the Entra `oid` claim with a unique constraint on
+`(owner_oid, name)`, which is what makes "save" an upsert. Verify the boundary held:
+
+```sql
+SELECT p.permission_name, OBJECT_NAME(p.major_id) AS object_name
+FROM sys.database_permissions p
+     JOIN sys.database_principals u ON u.principal_id = p.grantee_principal_id
+WHERE u.name = 'pihole_report_ro' AND p.class = 1;
+```
+
+Only `dbo.SavedReports` should appear.
+
 ### Optional: cap what a runaway query can consume
 
 Belt and braces alongside the app's own row cap and command timeout:
