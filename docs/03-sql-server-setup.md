@@ -224,17 +224,24 @@ CREATE TABLE dbo.DimType (
 );
 
 CREATE TABLE dbo.DimClient (
-    ip        varchar(255) PRIMARY KEY,
-    hostname  varchar(255) NULL,
-    mac       varchar(64)  NULL,
-    vendor    varchar(255) NULL,
-    interface varchar(64)  NULL
+    ip          varchar(64)  PRIMARY KEY,
+    name        varchar(255) NULL,   -- device name, NOT "hostname"
+    mac         varchar(32)  NULL,
+    mac_vendor  varchar(128) NULL,   -- OUI lookup, NOT "vendor"
+    interface   varchar(32)  NULL,
+    num_queries bigint       NULL,
+    last_query  datetime2    NULL
 );
 
 CREATE TABLE dbo.Adlists (
-    id      int PRIMARY KEY,
-    address varchar(512) NOT NULL,
-    comment varchar(512) NULL
+    id           int PRIMARY KEY,
+    address      varchar(500) NULL,
+    enabled      bit          NULL,
+    comment      varchar(255) NULL,
+    number       int          NULL,
+    status       int          NULL,
+    type         int          NULL,
+    date_updated datetime2    NULL
 );
 
 CREATE TABLE dbo.GravityDomains (

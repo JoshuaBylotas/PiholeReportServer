@@ -46,13 +46,13 @@ public sealed class SqlModel : PageModel
     private const string Sample = """
         -- Busiest clients over the last 24 hours, resolved to host names
         SELECT TOP (50)
-               COALESCE(dc.hostname, q.client) AS client,
+               COALESCE(dc.name, q.client) AS client,
                COUNT_BIG(*)                    AS queries,
                COUNT(DISTINCT q.domain)        AS distinct_domains
         FROM dbo.PiholeQueries AS q
              LEFT JOIN dbo.DimClient AS dc ON dc.ip = q.client
         WHERE q.ts >= DATEADD(hour, -24, SYSUTCDATETIME())
-        GROUP BY COALESCE(dc.hostname, q.client)
+        GROUP BY COALESCE(dc.name, q.client)
         ORDER BY queries DESC
         """;
 

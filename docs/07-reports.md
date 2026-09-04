@@ -170,7 +170,7 @@ ranked AS (
 )
 SELECT TOP (@top)
        r.client                            AS ip,
-       COALESCE(dc.hostname, '(unknown)')  AS hostname,
+       COALESCE(dc.name, '(unknown)')      AS hostname,
        r.hour_bucket,
        r.queries
 FROM ranked AS r

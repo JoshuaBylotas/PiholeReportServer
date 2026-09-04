@@ -2,11 +2,21 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace PiholeReportServer.Services;
 
-public sealed record ClientEntry(string Ip, string? Hostname, string? Vendor)
+public sealed record ClientEntry(string Ip, string? Name, string? MacVendor)
 {
     /// <summary>What the picker shows. Falls back to the IP when the device has no name.</summary>
     public string Label =>
-        string.IsNullOrWhiteSpace(Hostname) ? Ip : $"{Hostname} ({Ip})";
+        string.IsNullOrWhiteSpace(Name) ? Ip : $"{Name} ({Ip})";
+}
+
+/// <summary>
+/// The picker's contents plus, when the lookup failed, the reason. An empty list with
+/// no error genuinely means "no devices"; an empty list with an error means something
+/// is wrong and the message says what.
+/// </summary>
+public sealed record ClientLookup(IReadOnlyList<ClientEntry> Clients, string? Error)
+{
+    public bool Failed => Error is not null;
 }
 
 /// <summary>
@@ -23,10 +33,10 @@ public sealed class ClientDirectory
     private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(10);
 
     private const string Sql = """
-        SELECT dc.ip, dc.hostname, dc.vendor
+        SELECT dc.ip, dc.name, dc.mac_vendor
         FROM dbo.DimClient AS dc
-        ORDER BY CASE WHEN dc.hostname IS NULL OR dc.hostname = '' THEN 1 ELSE 0 END,
-                 dc.hostname,
+        ORDER BY CASE WHEN dc.name IS NULL OR dc.name = '' THEN 1 ELSE 0 END,
+                 dc.name,
                  dc.ip;
         """;
 
@@ -42,12 +52,14 @@ public sealed class ClientDirectory
     }
 
     /// <summary>
-    /// Known devices, or an empty list when the dimension table is missing or empty —
-    /// the caller shows a hint rather than failing the page.
+    /// Known devices. A failure is reported in <see cref="ClientLookup.Error"/> rather
+    /// than thrown, so the builder still renders — but the reason is surfaced, not
+    /// swallowed. Reporting a genuine SQL error as "no devices" once cost real
+    /// debugging time: an invalid column name looked identical to an empty table.
     /// </summary>
-    public async Task<IReadOnlyList<ClientEntry>> GetAsync(CancellationToken ct = default)
+    public async Task<ClientLookup> GetAsync(CancellationToken ct = default)
     {
-        if (_cache.TryGetValue(CacheKey, out IReadOnlyList<ClientEntry>? cached) && cached is not null)
+        if (_cache.TryGetValue(CacheKey, out ClientLookup? cached) && cached is not null)
         {
             return cached;
         }
@@ -65,12 +77,14 @@ public sealed class ClientDirectory
         }
         catch (Exception ex)
         {
-            // A missing DimClient must not take the builder down with it.
+            // A broken DimClient must not take the builder down with it, but the
+            // caller needs to know *why* the picker is empty.
             _log.LogWarning(ex, "Client directory unavailable; the picker will be empty.");
-            return entries;
+            return new ClientLookup([], ex.Message);
         }
 
-        _cache.Set(CacheKey, (IReadOnlyList<ClientEntry>)entries, Ttl);
-        return entries;
+        var lookup = new ClientLookup(entries, null);
+        _cache.Set(CacheKey, lookup, Ttl);
+        return lookup;
     }
 }

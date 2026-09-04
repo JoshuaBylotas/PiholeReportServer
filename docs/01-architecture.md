@@ -139,7 +139,7 @@ Dimensions, refreshed on a daily timer by `dims.py`:
 
 | Table | Grain | Join |
 |-------|-------|------|
-| `dbo.DimClient` | one row per known device | `DimClient.ip = PiholeQueries.client` |
+| `dbo.DimClient` | one row per known device (`ip`, `name`, `mac`, `mac_vendor`, `interface`, `num_queries`, `last_query`) | `DimClient.ip = PiholeQueries.client` |
 | `dbo.DimType` | one row per record type | `DimType.type = PiholeQueries.type` |
 | `dbo.DimStatus` | one row per status code | `DimStatus.status = PiholeQueries.status` |
 | `dbo.Adlists` | one row per subscribed blocklist | `Adlists.id = GravityDomains.adlist_id` |

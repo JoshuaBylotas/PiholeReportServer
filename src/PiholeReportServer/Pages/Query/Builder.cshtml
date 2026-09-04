@@ -50,23 +50,29 @@
         </div>
         <div class="field field-wide">
             <label asp-for="Spec.ClientIps">Clients</label>
-            @if (Model.Clients.Count == 0)
+            @if (Model.ClientList.Failed)
+            {
+                <span class="help" style="color:var(--danger-fg)">
+                    The device list could not be loaded: @Model.ClientList.Error
+                </span>
+            }
+            else if (Model.ClientList.Clients.Count == 0)
             {
                 <span class="help">
-                    No devices available &mdash; <code>dbo.DimClient</code> is empty or missing.
-                    Run the dimension refresh (<code>dims.py</code>), then reload.
+                    No devices in <code>dbo.DimClient</code>. Run the dimension refresh
+                    (<code>dims.py</code>), then reload.
                 </span>
             }
             else
             {
                 <select asp-for="Spec.ClientIps" multiple size="6" class="multi">
-                    @foreach (var c in Model.Clients)
+                    @foreach (var c in Model.ClientList.Clients)
                     {
-                        <option value="@c.Ip" title="@c.Vendor">@c.Label</option>
+                        <option value="@c.Ip" title="@c.MacVendor">@c.Label</option>
                     }
                 </select>
                 <span class="help">
-                    @Model.Clients.Count device@(Model.Clients.Count == 1 ? "" : "s").
+                    @Model.ClientList.Clients.Count device@(Model.ClientList.Clients.Count == 1 ? "" : "s").
                     Ctrl/&#8984;-click or shift-click to pick several; none selected means all.
                     <button type="button" class="linklike" onclick="clearClientPicker()">clear</button>
                 </span>

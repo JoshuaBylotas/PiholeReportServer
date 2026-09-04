@@ -206,4 +206,28 @@ public class BuilderSqlComposerTests
         Assert.Contains("q.client LIKE @clientFilter", composed.Sql);
         Assert.Contains("q.client IN (@cli0)", composed.Sql);
     }
+
+    [Fact]
+    public void Ungrouped_query_emits_no_order_by()
+    {
+        // A bare aggregate cannot be ordered by a non-aggregated column; SQL
+        // Server rejects it with Msg 8127.
+        var composed = BuilderSqlComposer.Compose(
+            new BuilderSpec { GroupBy = GroupDimension.None, ThenBy = GroupDimension.None },
+            5000);
+
+        Assert.DoesNotContain("ORDER BY", composed.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("GROUP BY", composed.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.True(SqlGuard.Validate(composed.Sql).Allowed);
+    }
+
+    [Fact]
+    public void Grouped_query_orders_by_the_metric_alias()
+    {
+        var composed = BuilderSqlComposer.Compose(
+            new BuilderSpec { GroupBy = GroupDimension.Domain, Metric = MetricKind.QueryCount },
+            5000);
+
+        Assert.Contains("ORDER BY [queries] DESC", composed.Sql);
+    }
 }

@@ -27,7 +27,7 @@ public static class BuilderSqlComposer
     {
         [GroupDimension.Domain]         = new("q.domain", "domain"),
         [GroupDimension.Client]         = new("q.client", "client"),
-        [GroupDimension.ClientHostname] = new("COALESCE(dc.hostname, q.client)", "client_name"),
+        [GroupDimension.ClientHostname] = new("COALESCE(dc.name, q.client)", "client_name"),
         [GroupDimension.QueryType]      = new("COALESCE(dt.type_text, CONCAT('type ', q.type))", "query_type"),
         [GroupDimension.Status]         = new("COALESCE(ds.status_text, q.status_text)", "status"),
         [GroupDimension.Upstream]       = new("COALESCE(q.forward, '(cache or blocked)')", "upstream"),
@@ -162,10 +162,17 @@ public static class BuilderSqlComposer
             sb.AppendLine("GROUP BY " + string.Join(", ", groups.Select(d => d.Expression)));
         }
 
-        var dir = spec.Sort == SortDirection.Asc ? "ASC" : "DESC";
-        sb.AppendLine(groups.Count > 0
-            ? $"ORDER BY [{metric.Alias}] {dir}"
-            : $"ORDER BY q.ts {dir}");
+        // With no grouping dimension the statement is a single-row aggregate, and
+        // ordering by a non-aggregated column is rejected outright:
+        //   Msg 8127: Column "dbo.PiholeQueries.ts" is invalid in the ORDER BY
+        //   clause because it is not contained in either an aggregate function
+        //   or the GROUP BY clause.
+        // There is nothing to order in that case, so emit no ORDER BY at all.
+        if (groups.Count > 0)
+        {
+            var dir = spec.Sort == SortDirection.Asc ? "ASC" : "DESC";
+            sb.AppendLine($"ORDER BY [{metric.Alias}] {dir}");
+        }
 
         sb.Append("OPTION (RECOMPILE);");
 

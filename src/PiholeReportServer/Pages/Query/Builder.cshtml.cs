@@ -36,8 +36,10 @@ public sealed class BuilderModel : PageModel
 
     public string? ErrorMessage { get; private set; }
 
-    /// <summary>Known devices for the client picker; empty if DimClient is unavailable.</summary>
-    public IReadOnlyList<ClientEntry> Clients { get; private set; } = [];
+    /// <summary>
+    /// The client picker's contents, plus the reason if the lookup failed.
+    /// </summary>
+    public ClientLookup ClientList { get; private set; } = new([], null);
 
     public async Task OnGetAsync(CancellationToken ct)
     {
@@ -46,12 +48,12 @@ public sealed class BuilderModel : PageModel
             From = DateTime.UtcNow.Date.AddDays(-_reporting.DefaultRangeDays),
             To = DateTime.UtcNow.Date.AddDays(1),
         };
-        Clients = await _clients.GetAsync(ct);
+        ClientList = await _clients.GetAsync(ct);
     }
 
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)
     {
-        Clients = await _clients.GetAsync(ct);
+        ClientList = await _clients.GetAsync(ct);
 
         if (!ModelState.IsValid)
         {
@@ -64,7 +66,7 @@ public sealed class BuilderModel : PageModel
 
     public async Task<IActionResult> OnPostExportAsync(CancellationToken ct)
     {
-        Clients = await _clients.GetAsync(ct);
+        ClientList = await _clients.GetAsync(ct);
 
         if (!ModelState.IsValid)
         {

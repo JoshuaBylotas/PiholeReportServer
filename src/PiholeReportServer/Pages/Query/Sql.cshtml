@@ -75,8 +75,8 @@
                 </tr>
                 <tr>
                     <td><code>dbo.DimClient</code></td>
-                    <td class="mono">ip, hostname, mac, vendor, interface</td>
-                    <td>Join on <code>DimClient.ip = PiholeQueries.client</code>.</td>
+                    <td class="mono">ip, name, mac, mac_vendor, interface, num_queries, last_query</td>
+                    <td>Join on <code>DimClient.ip = PiholeQueries.client</code>. The device name column is <code>name</code>, and the OUI lookup is <code>mac_vendor</code>.</td>
                 </tr>
                 <tr>
                     <td><code>dbo.DimType</code></td>
@@ -95,7 +95,7 @@
                 </tr>
                 <tr>
                     <td><code>dbo.Adlists</code></td>
-                    <td class="mono">id, address, comment</td>
+                    <td class="mono">id, address, enabled, comment, number, status, type, date_updated</td>
                     <td>Join on <code>Adlists.id = GravityDomains.adlist_id</code>.</td>
                 </tr>
             </tbody>

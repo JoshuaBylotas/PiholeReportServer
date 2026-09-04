@@ -1,8 +1,8 @@
 -- Busiest clients, resolved through the client dimension.
 SELECT TOP (@top)
        q.client                                  AS ip,
-       COALESCE(dc.hostname, '(unknown)')        AS hostname,
-       COALESCE(dc.vendor, '')                   AS vendor,
+       COALESCE(dc.name, '(unknown)')        AS hostname,
+       COALESCE(dc.mac_vendor, '')                   AS vendor,
        COALESCE(dc.mac, '')                      AS mac,
        COUNT_BIG(*)                              AS queries,
        COUNT(DISTINCT q.domain)                  AS distinct_domains,
@@ -12,5 +12,5 @@ FROM dbo.PiholeQueries AS q
      LEFT JOIN dbo.DimClient AS dc ON dc.ip = q.client
 WHERE q.ts >= @from
   AND q.ts <  @to
-GROUP BY q.client, dc.hostname, dc.vendor, dc.mac
+GROUP BY q.client, dc.name, dc.mac_vendor, dc.mac
 ORDER BY queries DESC;
