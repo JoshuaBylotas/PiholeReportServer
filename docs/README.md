@@ -56,7 +56,7 @@ somebody opens that report. After changing any report SQL, or after a loader sch
 change, run:
 
 ```powershell
-.	ools\Validate-ReportSql.ps1 -Server <SQL_HOST>
+.\tools\Validate-ReportSql.ps1 -Server <SQL_HOST>
 ```
 
 It binds every pre-canned report and every builder permutation with
