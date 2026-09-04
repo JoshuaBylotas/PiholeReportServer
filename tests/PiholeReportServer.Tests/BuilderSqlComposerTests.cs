@@ -112,12 +112,69 @@ public class BuilderSqlComposerTests
     }
 
     [Fact]
-    public void Blocklist_filter_adds_an_exists_predicate()
+    public void Any_blocklist_sentinel_adds_an_unfiltered_exists_predicate()
     {
         var composed = BuilderSqlComposer.Compose(
-            new BuilderSpec { OnlyBlocklisted = true }, 5000);
+            new BuilderSpec { BlocklistIds = [BuilderSpec.AnyBlocklistId] }, 5000);
+
         Assert.Contains("GravityDomains", composed.Sql);
         Assert.Contains("EXISTS", composed.Sql);
+        Assert.DoesNotContain("adlist_id IN", composed.Sql);
+    }
+
+    [Fact]
+    public void Selected_blocklists_become_an_in_list_of_bound_parameters()
+    {
+        var composed = BuilderSqlComposer.Compose(
+            new BuilderSpec { BlocklistIds = [9, 10] }, 5000);
+
+        Assert.Contains("gdf.adlist_id IN (@al0, @al1)", composed.Sql);
+        Assert.Equal(9, composed.Parameters["al0"]);
+        Assert.Equal(10, composed.Parameters["al1"]);
+        Assert.True(SqlGuard.Validate(composed.Sql).Allowed);
+    }
+
+    [Fact]
+    public void Any_blocklist_wins_over_specific_lists()
+    {
+        // Selecting "(any blocklist)" alongside specific lists is a wider request,
+        // not a narrower one, so it must not silently restrict to the named lists.
+        var composed = BuilderSqlComposer.Compose(
+            new BuilderSpec { BlocklistIds = [BuilderSpec.AnyBlocklistId, 9] }, 5000);
+
+        Assert.DoesNotContain("adlist_id IN", composed.Sql);
+    }
+
+    [Fact]
+    public void No_blocklist_selection_adds_no_predicate()
+    {
+        var composed = BuilderSqlComposer.Compose(new BuilderSpec(), 5000);
+        Assert.DoesNotContain("GravityDomains", composed.Sql);
+    }
+
+    [Fact]
+    public void Blocklist_dimension_joins_the_bridge_and_the_adlists()
+    {
+        var composed = BuilderSqlComposer.Compose(
+            new BuilderSpec { GroupBy = GroupDimension.Blocklist }, 5000);
+
+        Assert.Contains("INNER JOIN dbo.GravityDomains AS gd", composed.Sql);
+        Assert.Contains("LEFT JOIN dbo.Adlists AS al", composed.Sql);
+        Assert.Contains("[blocklist]", composed.Sql);
+        Assert.True(SqlGuard.Validate(composed.Sql).Allowed);
+    }
+
+    [Fact]
+    public void Blocklist_filter_and_dimension_use_distinct_aliases()
+    {
+        // Both bring dbo.GravityDomains into the statement; sharing an alias would
+        // make it ambiguous and fail to bind.
+        var composed = BuilderSqlComposer.Compose(
+            new BuilderSpec { GroupBy = GroupDimension.Blocklist, BlocklistIds = [9] },
+            5000);
+
+        Assert.Contains("AS gd ", composed.Sql);
+        Assert.Contains("AS gdf", composed.Sql);
     }
 
     [Fact]

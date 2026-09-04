@@ -64,7 +64,7 @@ public class BuilderSqlDumpTests
             DomainFilter = "example",
             StatusFilter = 2,
             TypeFilter = 1,
-            OnlyBlocklisted = true,
+            BlocklistIds = [9, 10],
             ClientIps = ["192.0.2.10", "192.0.2.11"],
             Sort = SortDirection.Asc,
         });

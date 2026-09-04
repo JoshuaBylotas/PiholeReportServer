@@ -543,3 +543,34 @@ select[multiple] option:checked {
 }
 
 .linklike:hover { color: var(--pine-800); }
+
+/* -- Save panel ---------------------------------------------------------- */
+
+.save-panel {
+  margin-top: 1.25rem;
+  border-top: 1px solid color-mix(in srgb, var(--charcoal) 10%, transparent);
+  padding-top: 1rem;
+}
+
+.save-panel > summary {
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--pine-700);
+  list-style: none;
+}
+
+.save-panel > summary::-webkit-details-marker { display: none; }
+
+.save-panel > summary::before {
+  content: "+";
+  display: inline-block;
+  width: 1.1rem;
+  font-weight: 600;
+}
+
+.save-panel[open] > summary::before { content: "2"; }
+
+.save-panel > summary:hover { color: var(--pine-800); }

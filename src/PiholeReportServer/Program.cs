@@ -87,6 +87,8 @@ builder.Services.AddScoped<ReportRunner>();
 builder.Services.AddSingleton<ReportCatalog>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ClientDirectory>();
+builder.Services.AddScoped<AdlistDirectory>();
+builder.Services.AddScoped<SavedReportStore>();
 
 builder.Services.AddHealthChecks();
 

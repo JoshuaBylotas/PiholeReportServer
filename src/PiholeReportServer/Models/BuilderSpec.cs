@@ -18,6 +18,7 @@ public sealed class BuilderSpec
         QueryType,
         Status,
         Upstream,
+        Blocklist,
         Hour,
         Day,
         Week,
@@ -76,8 +77,16 @@ public sealed class BuilderSpec
     [Display(Name = "Query type")]
     public int? TypeFilter { get; set; }
 
-    [Display(Name = "Only domains on a blocklist")]
-    public bool OnlyBlocklisted { get; set; }
+    /// <summary>
+    /// Blocklists to restrict to, by <c>dbo.Adlists.id</c>. Empty means no blocklist
+    /// filter at all; <see cref="AnyBlocklistId"/> means "on any subscribed list",
+    /// which is what the old single checkbox used to mean.
+    /// </summary>
+    [Display(Name = "On these blocklists")]
+    public List<int> BlocklistIds { get; set; } = [];
+
+    /// <summary>Sentinel option meaning "any subscribed blocklist".</summary>
+    public const int AnyBlocklistId = -1;
 
     [Display(Name = "Sort")]
     public SortDirection Sort { get; set; } = SortDirection.Desc;

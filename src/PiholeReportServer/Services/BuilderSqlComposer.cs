@@ -31,6 +31,7 @@ public static class BuilderSqlComposer
         [GroupDimension.QueryType]      = new("COALESCE(dt.type_text, CONCAT('type ', q.type))", "query_type"),
         [GroupDimension.Status]         = new("COALESCE(ds.status_text, q.status_text)", "status"),
         [GroupDimension.Upstream]       = new("COALESCE(q.forward, '(cache or blocked)')", "upstream"),
+        [GroupDimension.Blocklist]      = new("COALESCE(NULLIF(al.comment, ''), al.address, CONCAT('list ', gd.adlist_id))", "blocklist"),
         [GroupDimension.Hour]           = new("DATEADD(hour, DATEDIFF(hour, 0, q.ts), 0)", "hour_bucket"),
         [GroupDimension.Day]            = new("CAST(q.ts AS date)", "day"),
         [GroupDimension.Week]           = new("DATEADD(week, DATEDIFF(week, 0, q.ts), 0)", "week_start"),
@@ -71,6 +72,11 @@ public static class BuilderSqlComposer
         var needsClientDim = groups.Any(d => d.Alias == "client_name");
         var needsTypeDim = groups.Any(d => d.Alias == "query_type");
         var needsStatusDim = groups.Any(d => d.Alias == "status");
+        // Grouping by blocklist has to fan out: dbo.GravityDomains holds one row per
+        // (domain, adlist) pair, so a domain on three lists contributes to all three.
+        // That is the desired reading of "which list would have caught what" -- the
+        // per-list totals are correct, and their sum exceeds the query count by design.
+        var needsBlocklistDim = groups.Any(d => d.Alias == "blocklist");
 
         sb.AppendLine("SELECT TOP (@limit)");
         foreach (var d in groups)
@@ -91,6 +97,11 @@ public static class BuilderSqlComposer
         if (needsStatusDim)
         {
             sb.AppendLine("     LEFT JOIN dbo.DimStatus AS ds ON ds.status = q.status");
+        }
+        if (needsBlocklistDim)
+        {
+            sb.AppendLine("     INNER JOIN dbo.GravityDomains AS gd ON gd.domain = q.domain");
+            sb.AppendLine("     LEFT JOIN dbo.Adlists AS al ON al.id = gd.adlist_id");
         }
 
         var where = new List<string>();
@@ -147,9 +158,25 @@ public static class BuilderSqlComposer
             where.Add("q.type = @type");
             p["type"] = spec.TypeFilter.Value;
         }
-        if (spec.OnlyBlocklisted)
+        // Blocklist filter. An EXISTS subquery rather than a join, so that filtering
+        // does not multiply the row counts the way the blocklist *dimension* has to.
+        // The alias is gdf, distinct from the gd used by the dimension join.
+        var chosenLists = spec.BlocklistIds.Distinct().ToList();
+        if (chosenLists.Contains(BuilderSpec.AnyBlocklistId))
         {
-            where.Add("EXISTS (SELECT 1 FROM dbo.GravityDomains AS gd WHERE gd.domain = q.domain)");
+            where.Add("EXISTS (SELECT 1 FROM dbo.GravityDomains AS gdf WHERE gdf.domain = q.domain)");
+        }
+        else if (chosenLists.Count > 0)
+        {
+            var listPlaceholders = new List<string>(chosenLists.Count);
+            for (var i = 0; i < chosenLists.Count; i++)
+            {
+                var name = $"al{i}";
+                listPlaceholders.Add($"@{name}");
+                p[name] = chosenLists[i];
+            }
+            where.Add($"EXISTS (SELECT 1 FROM dbo.GravityDomains AS gdf "
+                      + $"WHERE gdf.domain = q.domain AND gdf.adlist_id IN ({string.Join(", ", listPlaceholders)}))");
         }
 
         if (where.Count > 0)

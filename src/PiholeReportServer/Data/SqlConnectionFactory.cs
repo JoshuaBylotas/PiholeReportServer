@@ -26,7 +26,7 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         _log = log;
     }
 
-    private string BuildConnectionString()
+    private string BuildConnectionString(bool writeIntent = false)
     {
         var b = new SqlConnectionStringBuilder
         {
@@ -36,9 +36,10 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
             TrustServerCertificate = _opt.TrustServerCertificate,
             ConnectTimeout = _opt.ConnectTimeoutSeconds,
             ApplicationName = _opt.ApplicationName,
-            // Reporting is strictly read-only; advertise that so a future
-            // Always On secondary can serve the load.
-            ApplicationIntent = ApplicationIntent.ReadOnly,
+            // Reporting is read-only, so advertise that and let an availability-group
+            // listener route it to a readable secondary. Saved-report writes must not
+            // carry that intent or they would land on a secondary and fail.
+            ApplicationIntent = writeIntent ? ApplicationIntent.ReadWrite : ApplicationIntent.ReadOnly,
             MultipleActiveResultSets = false,
         };
 
@@ -73,9 +74,15 @@ public sealed class SqlConnectionFactory : ISqlConnectionFactory
         return b.ConnectionString;
     }
 
-    public async Task<SqlConnection> OpenAsync(CancellationToken ct = default)
+    public Task<SqlConnection> OpenAsync(CancellationToken ct = default) =>
+        OpenCoreAsync(writeIntent: false, ct);
+
+    public Task<SqlConnection> OpenWriteAsync(CancellationToken ct = default) =>
+        OpenCoreAsync(writeIntent: true, ct);
+
+    private async Task<SqlConnection> OpenCoreAsync(bool writeIntent, CancellationToken ct)
     {
-        var conn = new SqlConnection(BuildConnectionString());
+        var conn = new SqlConnection(BuildConnectionString(writeIntent));
 
         if (_opt.AuthMode is SqlAuthMode.EntraApp or SqlAuthMode.EntraOnBehalfOf)
         {

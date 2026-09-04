@@ -116,7 +116,7 @@ if (Test-Path $builderDir) {
     Get-ChildItem $builderDir -Filter '*.sql' | ForEach-Object {
         $results.Add((Test-Sql -Name "builder/$($_.BaseName)" `
             -Sql (Get-Content $_.FullName -Raw) `
-            -ParamDecl '@limit int, @from datetime2, @to datetime2, @clientFilter varchar(255), @domainFilter varchar(255), @status int, @type int, @cli0 varchar(255), @cli1 varchar(255)'))
+            -ParamDecl '@limit int, @from datetime2, @to datetime2, @clientFilter varchar(255), @domainFilter varchar(255), @status int, @type int, @cli0 varchar(255), @cli1 varchar(255), @al0 int, @al1 int'))
     }
 }
 

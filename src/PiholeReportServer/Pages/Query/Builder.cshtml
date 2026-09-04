@@ -15,6 +15,43 @@
     </p>
 </div>
 
+@if (Model.StatusMessage is not null)
+{
+    <div class="notice notice-info">@Model.StatusMessage</div>
+}
+
+@if (Model.MySaved.Count > 0)
+{
+    <div class="card" style="margin-bottom:1.25rem">
+        <h3>My saved reports</h3>
+        <div class="table-wrap" style="margin-top:.75rem">
+            <table class="data">
+                <thead>
+                    <tr><th>Name</th><th>Description</th><th class="num">Runs</th><th>Last run</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.MySaved)
+                    {
+                        <tr>
+                            <td><a href="/Query/Builder?savedId=@r.Id">@r.Name</a></td>
+                            <td>@r.Description</td>
+                            <td class="num">@r.RunCount</td>
+                            <td class="nowrap">@(r.LastRunUtc?.ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                            <td>
+                                <form method="post" asp-page-handler="Delete" asp-route-id="@r.Id"
+                                      style="display:inline"
+                                      onsubmit="return confirm('Delete the saved report '@r.Name'?');">
+                                    <button type="submit" class="linklike">delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
 <form method="post" class="card">
     <div class="field-row">
         <div class="field">
@@ -74,7 +111,7 @@
                 <span class="help">
                     @Model.ClientList.Clients.Count device@(Model.ClientList.Clients.Count == 1 ? "" : "s").
                     Ctrl/&#8984;-click or shift-click to pick several; none selected means all.
-                    <button type="button" class="linklike" onclick="clearClientPicker()">clear</button>
+                    <button type="button" class="linklike" onclick="clearPicker('Spec_ClientIps')">clear</button>
                 </span>
             }
         </div>
@@ -98,15 +135,67 @@
         </div>
     </div>
 
-    <div class="checkline" style="margin-top:1rem">
-        <input asp-for="Spec.OnlyBlocklisted" type="checkbox" />
-        <label asp-for="Spec.OnlyBlocklisted">Only domains that appear on a blocklist</label>
+    <div class="field-row" style="margin-top:1rem">
+        <div class="field field-wide">
+            <label asp-for="Spec.BlocklistIds">On these blocklists</label>
+            @if (Model.AdlistList.Failed)
+            {
+                <span class="help" style="color:var(--danger-fg)">
+                    The blocklists could not be loaded: @Model.AdlistList.Error
+                </span>
+            }
+            else if (Model.AdlistList.Adlists.Count == 0)
+            {
+                <span class="help">
+                    No blocklists in <code>dbo.Adlists</code>. Run the dimension refresh
+                    (<code>dims.py</code>), then reload.
+                </span>
+            }
+            else
+            {
+                <select asp-for="Spec.BlocklistIds" multiple size="6" class="multi">
+                    <option value="@BuilderSpec.AnyBlocklistId">(any blocklist)</option>
+                    @foreach (var a in Model.AdlistList.Adlists)
+                    {
+                        <option value="@a.Id" title="@a.Address">@a.Label</option>
+                    }
+                </select>
+                <span class="help">
+                    Select nothing for no blocklist filter at all. Pick one or more lists to
+                    see only the traffic those lists would have caught &mdash; and set
+                    <strong>Group by &rarr; Blocklist</strong> to break the results down per list.
+                    <button type="button" class="linklike" onclick="clearPicker('Spec_BlocklistIds')">clear</button>
+                </span>
+            }
+        </div>
     </div>
 
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Run query</button>
         <button type="submit" class="btn btn-secondary" asp-page-handler="Export">Export CSV</button>
     </div>
+
+    <details class="save-panel" @(Model.SavedId is not null ? "open" : "")>
+        <summary>Save this report</summary>
+        <div class="field-row" style="margin-top:.75rem">
+            <div class="field">
+                <label asp-for="SaveInput.Name">Name</label>
+                <input asp-for="SaveInput.Name" type="text" maxlength="128"
+                       placeholder="e.g. Ad traffic by device, last 7 days" />
+            </div>
+            <div class="field field-wide">
+                <label asp-for="SaveInput.Description">Description</label>
+                <input asp-for="SaveInput.Description" type="text" maxlength="512"
+                       placeholder="optional" />
+            </div>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary" asp-page-handler="Save">Save report</button>
+            <span class="help">
+                Saved against your own account only. Saving under an existing name replaces it.
+            </span>
+        </div>
+    </details>
 
     <div asp-validation-summary="All" class="notice notice-error" style="margin-top:1rem"></div>
 </form>
@@ -115,6 +204,16 @@
 {
     <div class="notice notice-error" style="margin-top:1.5rem">
         <strong>The query failed.</strong> @Model.ErrorMessage
+    </div>
+}
+
+@if (Model.Spec.GroupBy == GroupDimension.Blocklist || Model.Spec.ThenBy == GroupDimension.Blocklist)
+{
+    <div class="notice notice-info" style="margin-top:1.5rem">
+        <strong>Grouping by blocklist counts each query once per matching list.</strong>
+        A domain that appears on three lists contributes to all three, so the per-list
+        totals are each correct but their sum exceeds the total query count. That is what
+        makes &ldquo;which list would have caught this&rdquo; answerable.
     </div>
 }
 
@@ -135,8 +234,8 @@
 
 @section Scripts {
     <script>
-        function clearClientPicker() {
-            const sel = document.getElementById('Spec_ClientIps');
+        function clearPicker(id) {
+            const sel = document.getElementById(id);
             if (sel) {
                 for (const o of sel.options) { o.selected = false; }
             }

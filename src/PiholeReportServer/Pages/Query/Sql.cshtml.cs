@@ -17,21 +17,36 @@ namespace PiholeReportServer.Pages.Query;
 public sealed class SqlModel : PageModel
 {
     private readonly ReportRunner _runner;
+    private readonly SavedReportStore _saved;
     private readonly ReportingOptions _reporting;
     private readonly ILogger<SqlModel> _log;
 
     public SqlModel(
         ReportRunner runner,
+        SavedReportStore saved,
         IOptions<ReportingOptions> reporting,
         ILogger<SqlModel> log)
     {
         _runner = runner;
+        _saved = saved;
         _reporting = reporting.Value;
         _log = log;
     }
 
     [BindProperty]
     public string? Sql { get; set; }
+
+    [BindProperty]
+    public SaveReportInput SaveInput { get; set; } = new();
+
+    [BindProperty(SupportsGet = true)]
+    public int? SavedId { get; set; }
+
+    public IReadOnlyList<SavedReport> MySaved { get; private set; } = [];
+
+    public string? StatusMessage { get; private set; }
+
+    private string? Owner => SavedReportStore.OwnerOid(User);
 
     public QueryResult? Result { get; private set; }
 
@@ -56,10 +71,120 @@ public sealed class SqlModel : PageModel
         ORDER BY queries DESC
         """;
 
-    public void OnGet() => Sql ??= Sample;
+    private async Task LoadSavedAsync(CancellationToken ct)
+    {
+        if (Owner is not { } owner)
+        {
+            return;
+        }
+
+        try
+        {
+            MySaved = await _saved.ListAsync(owner, SavedReportKind.Sql, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Saved queries unavailable.");
+        }
+    }
+
+    public async Task OnGetAsync(CancellationToken ct)
+    {
+        if (TempData["Status"] is string carried)
+        {
+            StatusMessage = carried;
+        }
+
+        await LoadSavedAsync(ct);
+
+        if (SavedId is { } id && Owner is { } owner)
+        {
+            var report = await _saved.GetAsync(owner, id, ct);
+            if (report is null)
+            {
+                ErrorMessage = "That saved query does not exist, or is not yours.";
+                return;
+            }
+
+            Sql = report.Payload;
+            SaveInput = new SaveReportInput { Name = report.Name, Description = report.Description };
+            StatusMessage = $"Loaded '{report.Name}'. Review it, then run.";
+            await _saved.TouchAsync(owner, id, ct);
+            return;
+        }
+
+        Sql ??= Sample;
+    }
+
+    public async Task<IActionResult> OnPostSaveAsync(CancellationToken ct)
+    {
+        await LoadSavedAsync(ct);
+
+        if (Owner is not { } owner)
+        {
+            ErrorMessage = "The signed-in user could not be identified, so nothing was saved.";
+            return Page();
+        }
+
+        if (string.IsNullOrWhiteSpace(SaveInput.Name))
+        {
+            ErrorMessage = "Give the query a name before saving it.";
+            return Page();
+        }
+
+        // Refuse to store something that would be rejected at run time anyway.
+        var verdict = SqlGuard.Validate(Sql);
+        if (!verdict.Allowed)
+        {
+            Rejected = true;
+            ErrorMessage = $"Not saved — {verdict.Reason}";
+            return Page();
+        }
+
+        try
+        {
+            var id = await _saved.SaveAsync(
+                owner,
+                SavedReportStore.OwnerName(User),
+                SaveInput.Name!,
+                SaveInput.Description,
+                SavedReportKind.Sql,
+                Sql!,
+                ct);
+
+            MySaved = await _saved.ListAsync(owner, SavedReportKind.Sql, ct);
+            SavedId = id;
+            StatusMessage = $"Saved '{SaveInput.Name!.Trim()}'.";
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Could not save: {ex.Message}";
+        }
+
+        return Page();
+    }
+
+    public async Task<IActionResult> OnPostDeleteAsync(int id, CancellationToken ct)
+    {
+        if (Owner is not { } owner)
+        {
+            return Forbid();
+        }
+
+        var report = await _saved.GetAsync(owner, id, ct);
+        var removed = await _saved.DeleteAsync(owner, id, ct);
+
+        TempData["Status"] = removed
+            ? $"Deleted '{report?.Name ?? id.ToString()}'."
+            : "That saved query does not exist, or is not yours.";
+
+        return RedirectToPage();
+    }
 
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)
     {
+        await LoadSavedAsync(ct);
+
         if (!Enabled)
         {
             ErrorMessage = "The SQL console is disabled by configuration (Reporting:EnableRawSql).";
@@ -91,6 +216,8 @@ public sealed class SqlModel : PageModel
 
     public async Task<IActionResult> OnPostExportAsync(CancellationToken ct)
     {
+        await LoadSavedAsync(ct);
+
         if (!Enabled)
         {
             ErrorMessage = "The SQL console is disabled by configuration (Reporting:EnableRawSql).";

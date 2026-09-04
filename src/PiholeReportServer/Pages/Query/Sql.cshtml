@@ -23,6 +23,47 @@
     </div>
 }
 
+@if (Model.StatusMessage is not null)
+{
+    <div class="notice notice-info">@Model.StatusMessage</div>
+}
+
+@if (Model.MySaved.Count > 0)
+{
+    <div class="card" style="margin-bottom:1.25rem">
+        <h3>My saved queries</h3>
+        <div class="table-wrap" style="margin-top:.75rem">
+            <table class="data">
+                <thead>
+                    <tr><th>Name</th><th>Description</th><th class="num">Runs</th><th>Last run</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in Model.MySaved)
+                    {
+                        <tr>
+                            <td><a href="/Query/Sql?savedId=@r.Id">@r.Name</a></td>
+                            <td>@r.Description</td>
+                            <td class="num">@r.RunCount</td>
+                            <td class="nowrap">@(r.LastRunUtc?.ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                            <td>
+                                <form method="post" asp-page-handler="Delete" asp-route-id="@r.Id"
+                                      style="display:inline"
+                                      onsubmit="return confirm('Delete the saved query '@r.Name'?');">
+                                    <button type="submit" class="linklike">delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <p class="small muted" style="margin-top:.75rem;margin-bottom:0">
+            Loading a saved query puts it in the editor; it is screened again before it runs,
+            so a query saved before a schema change fails safely rather than silently.
+        </p>
+    </div>
+}
+
 <form method="post" class="card">
     <div class="field">
         <label asp-for="Sql">Query</label>
@@ -41,6 +82,28 @@
         <span class="spacer"></span>
         <a class="btn btn-ghost" href="/Query/Builder">Use the builder instead</a>
     </div>
+
+    <details class="save-panel" @(Model.SavedId is not null ? "open" : "")>
+        <summary>Save this query</summary>
+        <div class="field-row" style="margin-top:.75rem">
+            <div class="field">
+                <label asp-for="SaveInput.Name">Name</label>
+                <input asp-for="SaveInput.Name" type="text" maxlength="128"
+                       placeholder="e.g. Busiest clients, last 24h" />
+            </div>
+            <div class="field field-wide">
+                <label asp-for="SaveInput.Description">Description</label>
+                <input asp-for="SaveInput.Description" type="text" maxlength="512"
+                       placeholder="optional" />
+            </div>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary" asp-page-handler="Save">Save query</button>
+            <span class="help">
+                Saved against your own account only. Saving under an existing name replaces it.
+            </span>
+        </div>
+    </details>
 </form>
 
 @if (Model.ErrorMessage is not null)
