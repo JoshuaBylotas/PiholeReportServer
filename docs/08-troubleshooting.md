@@ -57,6 +57,64 @@ Passing the *configuration section name* (`"AzureAd"`) as the scheme leaves the
 challenge pointing at a scheme that was never registered, and every anonymous request
 500s instead of redirecting to sign-in.
 
+### `AADSTS650057` invalid resource, sign-in fails at `/signin-oidc`
+
+> Message contains error: 'invalid_client', error_description: 'AADSTS650057: Invalid
+> resource. The client has requested access to a resource which is not listed in the
+> requested permissions in the client's application registration.'
+
+Entra issues the authorization code, then refuses to redeem it, so the browser lands on
+`/signin-oidc` with an HTTP 400 and the app logs an `AuthenticationFailureException`.
+
+The sign-in request asked for a resource the app registration has no permission for.
+The usual culprit is the Azure SQL scope: `EnableTokenAcquisitionToCallDownstreamApi`
+must only be given `Sql:TokenScope` up front when `Sql:AuthMode` is `EntraApp` or
+`EntraOnBehalfOf`. The `SqlLogin` and `Integrated` modes never need an Azure SQL
+permission, and requesting it anyway breaks sign-in completely.
+
+Check what is actually being asked for — browse to the site, copy the `Location` header
+of the 302, and read its `scope` parameter. For `SqlLogin` it should be exactly
+`openid profile offline_access`.
+
+If you genuinely want an Entra SQL mode, grant and admin-consent the Azure SQL
+`user_impersonation` permission — see
+[Entra ID setup §4](02-entra-id-setup.md#4-api-permissions) — and confirm your platform
+can accept Entra tokens at all
+([SQL Server setup](03-sql-server-setup.md#can-my-sql-server-actually-accept-entra-tokens)).
+
+### `message.State is null or empty` at `/signin-oidc`
+
+Harmless on its own: somebody browsed straight to `/signin-oidc`. That endpoint is the
+OIDC callback, not a page — Entra reaches it with an HTTP **POST** carrying `code` and
+`state` (`response_mode=form_post`), so a plain GET has nothing to validate and returns
+400. Start at `/` instead.
+
+Worth checking the log rather than assuming, though: a real sign-in failure and a stray
+manual GET both surface as a 400 on the same path, and the real one will have a
+different inner exception (see `AADSTS650057` above).
+
+### A redeploy appears to succeed but the old build keeps running
+
+`robocopy` returns an exit code **8 or higher** when files failed to copy, and with
+in-process hosting the running worker process holds `PiholeReportServer.dll` open, so
+the copy is refused while everything *looks* fine.
+
+Always check the exit code — 0-7 is success, 8+ is failure — and stop the app pool (or
+drop an `app_offline.htm` in the site root) before copying:
+
+```powershell
+Stop-WebAppPool -Name 'PiholeReportServer'
+robocopy <src> <dest> /MIR /XD logs
+icacls <dest> /grant 'BUILTIN\IIS_IUSRS:(OI)(CI)(RX)'   # /MIR resets these
+Start-WebAppPool -Name 'PiholeReportServer'
+```
+
+Confirm the deployed binary is actually the one you built:
+
+```powershell
+(Get-Item '<dest>\PiholeReportServer.dll').LastWriteTime
+```
+
 ### `AADSTS7000215` invalid client secret
 
 The secret expired, or the **secret ID** was copied instead of the **value**. Only the

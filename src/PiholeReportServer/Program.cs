@@ -16,20 +16,33 @@ builder.Services.Configure<SqlOptions>(builder.Configuration.GetSection(SqlOptio
 builder.Services.Configure<ReportingOptions>(builder.Configuration.GetSection(ReportingOptions.SectionName));
 
 // ── Entra ID sign-in ─────────────────────────────────────────────────────────
-// AddMicrosoftIdentityWebApp wires up the OpenID Connect code flow against the
-// tenant in configuration. EnableTokenAcquisitionToCallDownstreamApi is what
-// makes an on-behalf-of token for SQL Server available later; the distributed
-// (here in-memory) token cache holds the refresh material per session.
 // The default challenge scheme must be the OpenID Connect scheme that
 // AddMicrosoftIdentityWebApp actually registers. Naming it "AzureAd" (the
 // configuration section) instead leaves the challenge pointing at a scheme that
 // was never registered, and every anonymous request fails with
 // "No authenticationScheme was specified" rather than redirecting to sign-in.
-builder.Services
+//
+// The SQL scope is requested up front ONLY when an Entra SQL mode is actually
+// configured. Requesting it unconditionally breaks sign-in outright: Entra
+// issues the authorization code and then refuses to redeem it with
+//   AADSTS650057: Invalid resource. The client has requested access to a
+//   resource which is not listed in the requested permissions...
+// because the SqlLogin and Integrated modes never need an Azure SQL permission
+// on the app registration. Token acquisition is still wired up in every mode,
+// so ITokenAcquisition resolves and the Entra modes can fetch a token on
+// demand; only the up-front scope request is conditional.
+var sqlAuthMode = builder.Configuration.GetValue("Sql:AuthMode", SqlAuthMode.SqlLogin);
+var sqlNeedsEntraToken = sqlAuthMode is SqlAuthMode.EntraApp or SqlAuthMode.EntraOnBehalfOf;
+var sqlScope = builder.Configuration["Sql:TokenScope"]
+               ?? "https://database.windows.net//.default";
+
+var authentication = builder.Services
     .AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
-    .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"))
-    .EnableTokenAcquisitionToCallDownstreamApi(
-        [builder.Configuration["Sql:TokenScope"] ?? "https://database.windows.net//.default"])
+    .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"));
+
+(sqlNeedsEntraToken
+        ? authentication.EnableTokenAcquisitionToCallDownstreamApi([sqlScope])
+        : authentication.EnableTokenAcquisitionToCallDownstreamApi())
     .AddInMemoryTokenCaches();
 
 builder.Services.AddAuthorization(options =>
