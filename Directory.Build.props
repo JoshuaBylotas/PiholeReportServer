@@ -6,6 +6,11 @@
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Do NOT turn this on. Microsoft.Data.SqlClient throws
+         "Globalization Invariant Mode is not supported" on every connection
+         attempt, so the entire reporting surface fails at runtime while the
+         build and the test suite stay green. GlobalizationTests guards it. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
 </Project>

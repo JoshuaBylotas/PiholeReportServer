@@ -10,15 +10,18 @@ namespace PiholeReportServer.Pages.Query;
 public sealed class BuilderModel : PageModel
 {
     private readonly ReportRunner _runner;
+    private readonly ClientDirectory _clients;
     private readonly ReportingOptions _reporting;
     private readonly ILogger<BuilderModel> _log;
 
     public BuilderModel(
         ReportRunner runner,
+        ClientDirectory clients,
         IOptions<ReportingOptions> reporting,
         ILogger<BuilderModel> log)
     {
         _runner = runner;
+        _clients = clients;
         _reporting = reporting.Value;
         _log = log;
     }
@@ -33,17 +36,23 @@ public sealed class BuilderModel : PageModel
 
     public string? ErrorMessage { get; private set; }
 
-    public void OnGet()
+    /// <summary>Known devices for the client picker; empty if DimClient is unavailable.</summary>
+    public IReadOnlyList<ClientEntry> Clients { get; private set; } = [];
+
+    public async Task OnGetAsync(CancellationToken ct)
     {
         Spec = new BuilderSpec
         {
             From = DateTime.UtcNow.Date.AddDays(-_reporting.DefaultRangeDays),
             To = DateTime.UtcNow.Date.AddDays(1),
         };
+        Clients = await _clients.GetAsync(ct);
     }
 
     public async Task<IActionResult> OnPostAsync(CancellationToken ct)
     {
+        Clients = await _clients.GetAsync(ct);
+
         if (!ModelState.IsValid)
         {
             return Page();
@@ -55,6 +64,8 @@ public sealed class BuilderModel : PageModel
 
     public async Task<IActionResult> OnPostExportAsync(CancellationToken ct)
     {
+        Clients = await _clients.GetAsync(ct);
+
         if (!ModelState.IsValid)
         {
             return Page();

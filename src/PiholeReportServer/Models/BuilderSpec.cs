@@ -57,6 +57,15 @@ public sealed class BuilderSpec
     [StringLength(64)]
     public string? ClientFilter { get; set; }
 
+    /// <summary>
+    /// Clients chosen from the multi-select picker. The picker shows device
+    /// names, but its option values are IPs: that is what the fact table
+    /// stores and what is indexed, and one host name can cover more than one
+    /// address. Empty means "all clients".
+    /// </summary>
+    [Display(Name = "Clients")]
+    public List<string> ClientIps { get; set; } = [];
+
     [Display(Name = "Domain contains")]
     [StringLength(255)]
     public string? DomainFilter { get; set; }

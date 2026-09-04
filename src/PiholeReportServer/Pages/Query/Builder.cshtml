@@ -48,6 +48,30 @@
             <label asp-for="Spec.ClientFilter">Client IP contains</label>
             <input asp-for="Spec.ClientFilter" type="text" placeholder="e.g. 192.0.2." />
         </div>
+        <div class="field field-wide">
+            <label asp-for="Spec.ClientIps">Clients</label>
+            @if (Model.Clients.Count == 0)
+            {
+                <span class="help">
+                    No devices available &mdash; <code>dbo.DimClient</code> is empty or missing.
+                    Run the dimension refresh (<code>dims.py</code>), then reload.
+                </span>
+            }
+            else
+            {
+                <select asp-for="Spec.ClientIps" multiple size="6" class="multi">
+                    @foreach (var c in Model.Clients)
+                    {
+                        <option value="@c.Ip" title="@c.Vendor">@c.Label</option>
+                    }
+                </select>
+                <span class="help">
+                    @Model.Clients.Count device@(Model.Clients.Count == 1 ? "" : "s").
+                    Ctrl/&#8984;-click or shift-click to pick several; none selected means all.
+                    <button type="button" class="linklike" onclick="clearClientPicker()">clear</button>
+                </span>
+            }
+        </div>
         <div class="field">
             <label asp-for="Spec.StatusFilter">Status code</label>
             <input asp-for="Spec.StatusFilter" type="number" placeholder="any" />
@@ -101,4 +125,15 @@
             <pre style="margin:0;white-space:pre-wrap">@Model.GeneratedSql</pre>
         </div>
     </details>
+}
+
+@section Scripts {
+    <script>
+        function clearClientPicker() {
+            const sel = document.getElementById('Spec_ClientIps');
+            if (sel) {
+                for (const o of sel.options) { o.selected = false; }
+            }
+        }
+    </script>
 }

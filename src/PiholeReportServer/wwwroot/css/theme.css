@@ -509,3 +509,37 @@ td.null { color: color-mix(in srgb, var(--charcoal) 35%, transparent); font-styl
   body { background: white; }
   .table-wrap { border: none; }
 }
+
+/* -- Multi-select picker ------------------------------------------------- */
+
+select[multiple], select.multi {
+  padding: 0.35rem;
+  min-height: 8.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+select[multiple] option {
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+
+select[multiple] option:checked {
+  background: var(--pine-600) linear-gradient(0deg, var(--pine-600) 0%, var(--pine-600) 100%);
+  color: var(--cream);
+}
+
+/* A field that should span the full width of the grid rather than sit in a
+   narrow auto-fit column - the client picker needs the room. */
+.field-row .field-wide { grid-column: 1 / -1; }
+
+.linklike {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--pine-600);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.linklike:hover { color: var(--pine-800); }

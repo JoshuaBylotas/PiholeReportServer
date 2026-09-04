@@ -18,6 +18,9 @@ public sealed record ComposedQuery(string Sql, Dictionary<string, object?> Param
 /// </summary>
 public static class BuilderSqlComposer
 {
+    /// <summary>Upper bound on entries in the generated client IN list.</summary>
+    public const int MaxSelectedClients = 500;
+
     private sealed record Dimension(string Expression, string Alias);
 
     private static readonly Dictionary<GroupDimension, Dimension> Dimensions = new()
@@ -106,6 +109,28 @@ public static class BuilderSqlComposer
         {
             where.Add("q.client LIKE @clientFilter");
             p["clientFilter"] = $"%{Escape(spec.ClientFilter)}%";
+        }
+
+        // Multi-select client picker. Only the parameter *names* are generated
+        // (from an index), never the values, so the selection cannot inject SQL
+        // however the form is tampered with. Capped so a hand-crafted post
+        // cannot build a pathological IN list.
+        var chosenClients = spec.ClientIps
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxSelectedClients)
+            .ToList();
+
+        if (chosenClients.Count > 0)
+        {
+            var placeholders = new List<string>(chosenClients.Count);
+            for (var i = 0; i < chosenClients.Count; i++)
+            {
+                var name = $"cli{i}";
+                placeholders.Add($"@{name}");
+                p[name] = chosenClients[i];
+            }
+            where.Add($"q.client IN ({string.Join(", ", placeholders)})");
         }
         if (!string.IsNullOrWhiteSpace(spec.DomainFilter))
         {

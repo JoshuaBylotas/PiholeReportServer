@@ -119,4 +119,91 @@ public class BuilderSqlComposerTests
         Assert.Contains("GravityDomains", composed.Sql);
         Assert.Contains("EXISTS", composed.Sql);
     }
+
+    [Fact]
+    public void Selected_clients_become_an_in_list_of_bound_parameters()
+    {
+        var spec = new BuilderSpec
+        {
+            ClientIps = ["192.0.2.10", "192.0.2.11", "192.0.2.12"],
+        };
+
+        var composed = BuilderSqlComposer.Compose(spec, 5000);
+
+        Assert.Contains("q.client IN (@cli0, @cli1, @cli2)", composed.Sql);
+        Assert.Equal("192.0.2.10", composed.Parameters["cli0"]);
+        Assert.Equal("192.0.2.11", composed.Parameters["cli1"]);
+        Assert.Equal("192.0.2.12", composed.Parameters["cli2"]);
+        Assert.True(SqlGuard.Validate(composed.Sql).Allowed);
+    }
+
+    [Fact]
+    public void No_selected_clients_means_no_in_clause()
+    {
+        var composed = BuilderSqlComposer.Compose(new BuilderSpec(), 5000);
+        Assert.DoesNotContain("q.client IN", composed.Sql);
+    }
+
+    [Fact]
+    public void Hostile_client_values_stay_parameters_and_never_reach_the_sql()
+    {
+        // A tampered form post is the threat here, since the picker itself only
+        // offers known IPs.
+        var spec = new BuilderSpec
+        {
+            ClientIps = ["192.0.2.1') OR 1=1 --", "'; DROP TABLE dbo.PiholeQueries --"],
+        };
+
+        var composed = BuilderSqlComposer.Compose(spec, 5000);
+
+        Assert.DoesNotContain("DROP", composed.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("OR 1=1", composed.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("q.client IN (@cli0, @cli1)", composed.Sql);
+        Assert.True(SqlGuard.Validate(composed.Sql).Allowed);
+    }
+
+    [Fact]
+    public void Duplicate_and_blank_client_selections_are_collapsed()
+    {
+        var spec = new BuilderSpec
+        {
+            ClientIps = ["192.0.2.10", "192.0.2.10", "", "  ", "192.0.2.11"],
+        };
+
+        var composed = BuilderSqlComposer.Compose(spec, 5000);
+
+        Assert.Contains("q.client IN (@cli0, @cli1)", composed.Sql);
+        Assert.DoesNotContain("@cli2", composed.Sql);
+    }
+
+    [Fact]
+    public void Client_selection_is_capped()
+    {
+        var spec = new BuilderSpec
+        {
+            ClientIps = Enumerable.Range(0, BuilderSqlComposer.MaxSelectedClients + 250)
+                                  .Select(i => $"10.0.{i / 256}.{i % 256}")
+                                  .ToList(),
+        };
+
+        var composed = BuilderSqlComposer.Compose(spec, 5000);
+
+        var bound = composed.Parameters.Keys.Count(k => k.StartsWith("cli", StringComparison.Ordinal));
+        Assert.Equal(BuilderSqlComposer.MaxSelectedClients, bound);
+    }
+
+    [Fact]
+    public void Client_picker_and_contains_filter_combine()
+    {
+        var spec = new BuilderSpec
+        {
+            ClientIps = ["192.0.2.10"],
+            ClientFilter = "192.0.2.",
+        };
+
+        var composed = BuilderSqlComposer.Compose(spec, 5000);
+
+        Assert.Contains("q.client LIKE @clientFilter", composed.Sql);
+        Assert.Contains("q.client IN (@cli0)", composed.Sql);
+    }
 }

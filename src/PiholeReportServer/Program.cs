@@ -85,6 +85,8 @@ builder.Services.AddRazorPages(options =>
 builder.Services.AddScoped<ISqlConnectionFactory, SqlConnectionFactory>();
 builder.Services.AddScoped<ReportRunner>();
 builder.Services.AddSingleton<ReportCatalog>();
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<ClientDirectory>();
 
 builder.Services.AddHealthChecks();
 
