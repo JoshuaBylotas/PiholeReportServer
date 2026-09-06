@@ -14,6 +14,7 @@ var builder = WebApplication.CreateBuilder(args);
 // ── Options ──────────────────────────────────────────────────────────────────
 builder.Services.Configure<SqlOptions>(builder.Configuration.GetSection(SqlOptions.SectionName));
 builder.Services.Configure<ReportingOptions>(builder.Configuration.GetSection(ReportingOptions.SectionName));
+builder.Services.Configure<AiOptions>(builder.Configuration.GetSection(AiOptions.SectionName));
 
 // ── Entra ID sign-in ─────────────────────────────────────────────────────────
 // The default challenge scheme must be the OpenID Connect scheme that
@@ -89,6 +90,9 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ClientDirectory>();
 builder.Services.AddScoped<AdlistDirectory>();
 builder.Services.AddScoped<SavedReportStore>();
+// Typed client so the long inference timeout is scoped to this one dependency
+// rather than applied to every outbound call the app might make.
+builder.Services.AddHttpClient<AiClient>();
 
 builder.Services.AddHealthChecks();
 
