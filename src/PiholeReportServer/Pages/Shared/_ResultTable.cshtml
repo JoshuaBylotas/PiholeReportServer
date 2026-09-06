@@ -21,7 +21,7 @@
     <div class="notice notice-warn">
         <strong>Showing the first @Model.RowCap.ToString("N0") rows.</strong>
         The result set is larger. Narrow the date range or add a filter, or export to CSV
-        to get the full result.
+        for the complete result &mdash; searching below only filters the rows already fetched.
     </div>
 }
 
@@ -31,44 +31,83 @@
 }
 else
 {
-    <div class="table-wrap">
-        <table class="data">
-            <thead>
-                <tr>
-                    @foreach (var c in Model.Columns)
-                    {
-                        <th class="@(numeric.Contains(c.ClrType) ? "num" : "")" scope="col">@c.Name</th>
-                    }
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var row in Model.Rows)
-                {
+    <div data-result-root>
+        @* Hidden until the script takes over, so with JavaScript off the page still
+           shows the whole table rather than controls that do nothing. *@
+        <div class="result-toolbar" data-result-toolbar hidden>
+            <div class="result-search">
+                <label class="visually-hidden" for="resultSearch">Search results</label>
+                <input type="search" id="resultSearch" data-result-search
+                       placeholder="Search all columns&hellip;"
+                       autocomplete="off" spellcheck="false" />
+            </div>
+
+            <span class="small muted nowrap" data-result-status></span>
+
+            <span class="spacer"></span>
+
+            <label class="small muted nowrap">
+                Rows per page
+                <select data-result-pagesize class="pagesize">
+                    <option value="50">50</option>
+                    <option value="100" selected>100</option>
+                    <option value="250">250</option>
+                    <option value="500">500</option>
+                    <option value="all">All</option>
+                </select>
+            </label>
+
+            <div class="pager">
+                <button type="button" class="btn btn-secondary btn-compact"
+                        data-result-prev aria-label="Previous page">&#8592;&nbsp;Prev</button>
+                <button type="button" class="btn btn-secondary btn-compact"
+                        data-result-next aria-label="Next page">Next&nbsp;&#8594;</button>
+            </div>
+        </div>
+
+        <div class="notice notice-info" data-result-empty hidden>
+            No rows match that search. Space-separated terms must all appear in the row.
+        </div>
+
+        <div class="table-wrap">
+            <table class="data">
+                <thead>
                     <tr>
-                        @for (var i = 0; i < row.Length; i++)
+                        @foreach (var c in Model.Columns)
                         {
-                            var col = Model.Columns[i];
-                            var isNum = numeric.Contains(col.ClrType);
-                            @if (row[i] is null)
-                            {
-                                <td class="null">null</td>
-                            }
-                            else if (row[i] is DateTime dt)
-                            {
-                                <td class="nowrap">@dt.ToString("yyyy-MM-dd HH:mm:ss")</td>
-                            }
-                            else if (isNum)
-                            {
-                                <td class="num">@(row[i] is long or int or short ? Convert.ToInt64(row[i]).ToString("N0") : row[i]!.ToString())</td>
-                            }
-                            else
-                            {
-                                <td>@row[i]!.ToString()</td>
-                            }
+                            <th class="@(numeric.Contains(c.ClrType) ? "num" : "")" scope="col">@c.Name</th>
                         }
                     </tr>
-                }
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    @foreach (var row in Model.Rows)
+                    {
+                        <tr>
+                            @for (var i = 0; i < row.Length; i++)
+                            {
+                                var col = Model.Columns[i];
+                                var isNum = numeric.Contains(col.ClrType);
+                                @if (row[i] is null)
+                                {
+                                    <td class="null">null</td>
+                                }
+                                else if (row[i] is DateTime dt)
+                                {
+                                    <td class="nowrap">@dt.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                }
+                                else if (isNum)
+                                {
+                                    <td class="num">@(row[i] is long or int or short ? Convert.ToInt64(row[i]).ToString("N0") : row[i]!.ToString())</td>
+                                }
+                                else
+                                {
+                                    <td>@row[i]!.ToString()</td>
+                                }
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
 }

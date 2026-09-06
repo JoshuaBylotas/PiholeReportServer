@@ -150,6 +150,52 @@ never inflates counts.
 
 ---
 
+## Working with a result set
+
+Every result — pre-canned report, builder or SQL console — renders through the same
+component, so these behave identically everywhere.
+
+### Search
+
+A search box above the table filters the rows **already fetched**. Space-separated terms
+must *all* appear somewhere in the row, so `samsung advert` narrows rather than widening.
+Escape clears it.
+
+It is client-side by design: the rows are already materialised and row-capped by the
+server, so filtering costs nothing and returns instantly. The corollary is that search
+cannot find rows beyond the row cap — if a result is truncated, narrow the query or export
+to CSV instead. The page says so when that applies.
+
+### Paging
+
+50 / 100 / 250 / 500 / All rows per page, with prev-next and a
+"Showing 1–100 of 4,214 (filtered from 5,000)" readout.
+
+Paging is client-side for the same reason: turning a page server-side would re-run an
+aggregate over tens of millions of rows to fetch the next fifty.
+
+Both controls stay hidden until the script initialises, so with JavaScript disabled the
+full table renders rather than dead widgets.
+
+### While a query runs
+
+Submitting a query raises a full-page overlay with a spinner. It covers the viewport, so
+it captures every click — that is what stops a second query being launched, or a nav link
+being followed, mid-flight. Submit buttons are disabled alongside it, and the header is
+dimmed and made inert.
+
+Three cases are handled differently, because they end differently:
+
+| Action | Overlay |
+|--------|---------|
+| Run a query | Clears when the new page renders |
+| Export CSV | A download never navigates, so nothing would clear the overlay — it times itself out |
+| Delete a saved report | Redirects, and clears on the new page |
+
+Cancelling a delete confirmation does not raise the overlay at all, and returning via the
+browser's back button clears it — otherwise the back-forward cache would restore a page
+frozen behind a spinner that has nothing left to wait for.
+
 ## Saved reports
 
 Anything you build in the builder, or write in the SQL console, can be saved to your own
