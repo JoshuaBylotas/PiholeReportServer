@@ -18,17 +18,20 @@ public sealed class SqlModel : PageModel
 {
     private readonly ReportRunner _runner;
     private readonly SavedReportStore _saved;
+    private readonly AiClient _ai;
     private readonly ReportingOptions _reporting;
     private readonly ILogger<SqlModel> _log;
 
     public SqlModel(
         ReportRunner runner,
         SavedReportStore saved,
+        AiClient ai,
         IOptions<ReportingOptions> reporting,
         ILogger<SqlModel> log)
     {
         _runner = runner;
         _saved = saved;
+        _ai = ai;
         _reporting = reporting.Value;
         _log = log;
     }
@@ -43,6 +46,9 @@ public sealed class SqlModel : PageModel
     public int? SavedId { get; set; }
 
     public IReadOnlyList<SavedReport> MySaved { get; private set; } = [];
+
+    public AiPanelViewModel AiPanel => AiPanelViewModel.For(
+        _ai.Enabled, _ai.Model, User.IsInRole(AppRoles.SqlAuthor), Result, "ad-hoc SQL query");
 
     public string? StatusMessage { get; private set; }
 

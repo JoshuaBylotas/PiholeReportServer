@@ -26,6 +26,7 @@ public sealed class BuilderModel : PageModel
     private readonly ClientDirectory _clients;
     private readonly AdlistDirectory _adlists;
     private readonly SavedReportStore _saved;
+    private readonly AiClient _ai;
     private readonly ReportingOptions _reporting;
     private readonly ILogger<BuilderModel> _log;
 
@@ -34,6 +35,7 @@ public sealed class BuilderModel : PageModel
         ClientDirectory clients,
         AdlistDirectory adlists,
         SavedReportStore saved,
+        AiClient ai,
         IOptions<ReportingOptions> reporting,
         ILogger<BuilderModel> log)
     {
@@ -41,6 +43,7 @@ public sealed class BuilderModel : PageModel
         _clients = clients;
         _adlists = adlists;
         _saved = saved;
+        _ai = ai;
         _reporting = reporting.Value;
         _log = log;
     }
@@ -67,6 +70,10 @@ public sealed class BuilderModel : PageModel
     public AdlistLookup AdlistList { get; private set; } = new([], null);
 
     public IReadOnlyList<SavedReport> MySaved { get; private set; } = [];
+
+    public AiPanelViewModel AiPanel => AiPanelViewModel.For(
+        _ai.Enabled, _ai.Model, User.IsInRole(AppRoles.SqlAuthor), Result,
+        $"report builder, grouped by {Spec.GroupBy}, metric {Spec.Metric}");
 
     private string? Owner => SavedReportStore.OwnerOid(User);
 

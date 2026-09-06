@@ -11,17 +11,20 @@ public sealed class RunModel : PageModel
 {
     private readonly ReportCatalog _catalog;
     private readonly ReportRunner _runner;
+    private readonly AiClient _ai;
     private readonly ReportingOptions _reporting;
     private readonly ILogger<RunModel> _log;
 
     public RunModel(
         ReportCatalog catalog,
         ReportRunner runner,
+        AiClient ai,
         IOptions<ReportingOptions> reporting,
         ILogger<RunModel> log)
     {
         _catalog = catalog;
         _runner = runner;
+        _ai = ai;
         _reporting = reporting.Value;
         _log = log;
     }
@@ -39,6 +42,10 @@ public sealed class RunModel : PageModel
     public string? ErrorMessage { get; private set; }
 
     public bool HasRun { get; private set; }
+
+    public AiPanelViewModel AiPanel => AiPanelViewModel.For(
+        _ai.Enabled, _ai.Model, User.IsInRole(AppRoles.SqlAuthor), Result,
+        Report is null ? "report" : $"the '{Report.Title}' report");
 
     private bool Load()
     {

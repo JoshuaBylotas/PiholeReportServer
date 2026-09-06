@@ -699,3 +699,52 @@ html.is-busy .site-header { opacity: 0.55; }
 /* Paged-out rows are hidden with the attribute, so keep that authoritative
    even though table rows have their own display type. */
 table.data tbody tr[hidden] { display: none; }
+
+/* -- AI panel ------------------------------------------------------------ */
+
+.ai-panel { margin-top: 1.5rem; }
+
+.ai-head { display: flex; align-items: flex-start; gap: 0.9rem; margin-bottom: 1rem; }
+
+.ai-icon {
+  margin-bottom: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  background-color: var(--gold-100);
+  color: var(--gold-800);
+  flex: none;
+}
+
+.ai-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+
+.ai-ask { margin-top: 1rem; }
+.ai-ask input[type="text"] { flex: 1 1 22rem; min-width: 14rem; border-radius: var(--radius-full); padding-inline: 0.9rem; }
+
+.ai-output { margin-top: 1rem; }
+
+.ai-thinking {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  color: color-mix(in srgb, var(--charcoal) 65%, transparent);
+}
+
+.ai-spinner { width: 1.25rem; height: 1.25rem; border-width: 2px; }
+
+.ai-answer {
+  border-left: 3px solid var(--gold-400);
+  padding-left: 1rem;
+}
+
+.ai-prose { white-space: pre-wrap; font-size: 0.9375rem; }
+
+.ai-sql {
+  margin: 0.6rem 0;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--charcoal) 10%, transparent);
+  background-color: var(--cream-dark);
+  white-space: pre-wrap;
+  overflow-x: auto;
+}

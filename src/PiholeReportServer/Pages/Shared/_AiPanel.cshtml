@@ -1,0 +1,73 @@
+@model PiholeReportServer.Models.AiPanelViewModel
+
+@if (Model.Enabled)
+{
+    <div class="card ai-panel" data-ai-panel>
+        @* Razor Pages requires an antiforgery token on POST. The fetch calls read it
+           from here rather than the endpoints opting out of validation. *@
+        @Html.AntiForgeryToken()
+
+        <div class="ai-head">
+            <span class="icon-tile ai-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3v3" /><path d="M12 18v3" /><path d="M3 12h3" /><path d="M18 12h3" />
+                    <circle cx="12" cy="12" r="4" />
+                </svg>
+            </span>
+            <div>
+                <h3 style="margin:0">Ask the data</h3>
+                <p class="small muted" style="margin:0">
+                    Runs locally on your own hardware &mdash; nothing leaves the network.
+                    @if (Model.Model is not null)
+                    {
+                        <span class="mono">@Model.Model</span>
+                    }
+                </p>
+            </div>
+        </div>
+
+        @if (Model.HasResult)
+        {
+            <div class="ai-row">
+                <button type="button" class="btn btn-secondary" data-ai-explain
+                        data-ai-digest="@Model.Digest" data-ai-context="@Model.Context">
+                    Explain these results
+                </button>
+                <span class="help">
+                    Summarises statistics computed from the whole result, not just this page.
+                </span>
+            </div>
+        }
+        else
+        {
+            <p class="small muted">Run a query to enable &ldquo;Explain these results&rdquo;.</p>
+        }
+
+        @if (Model.CanAsk)
+        {
+            <div class="ai-ask">
+                <label class="visually-hidden" for="aiQuestion">Ask a question about the data</label>
+                <div class="ai-row">
+                    <input type="text" id="aiQuestion" data-ai-question maxlength="500"
+                           placeholder="e.g. which device queried the most ad domains last week?"
+                           autocomplete="off" />
+                    <button type="button" class="btn btn-primary" data-ai-ask>Ask</button>
+                </div>
+                <span class="help">
+                    Writes a SQL query for you. It is screened before it can run, and you
+                    review it first &mdash; nothing executes automatically.
+                </span>
+            </div>
+        }
+        else
+        {
+            <p class="small muted" style="margin-top:.75rem">
+                Asking free-text questions writes new SQL, so it needs the
+                <span class="mono">Report.SqlAuthor</span> role.
+            </p>
+        }
+
+        <div class="ai-output" data-ai-output hidden></div>
+    </div>
+}

@@ -131,11 +131,18 @@ public sealed class AiClient
     /// measured at ~150 seconds for 100 rows and produced a recital rather than an
     /// insight.
     /// </summary>
-    public async Task<string> SummariseAsync(QueryResult result, string context, CancellationToken ct = default)
+    public Task<string> SummariseAsync(QueryResult result, string context, CancellationToken ct = default) =>
+        SummariseFromDigestAsync(ResultDigest.Build(result, context), ct);
+
+    /// <summary>
+    /// Narrates an already-built digest. Separate from <see cref="SummariseAsync"/>
+    /// because the digest is computed when the page renders and posted back by the
+    /// browser — that keeps "explain" to one small request instead of shipping
+    /// thousands of rows to the server and back.
+    /// </summary>
+    public async Task<string> SummariseFromDigestAsync(string digest, CancellationToken ct = default)
     {
         EnsureEnabled();
-
-        var digest = ResultDigest.Build(result, context);
 
         var request = new OllamaGenerate
         {
