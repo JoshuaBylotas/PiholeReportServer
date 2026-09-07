@@ -145,6 +145,56 @@ Dimensions, refreshed on a daily timer by `dims.py`:
 | `dbo.Adlists` | one row per subscribed blocklist | `Adlists.id = GravityDomains.adlist_id` |
 | `dbo.GravityDomains` | domain → blocklist bridge | `GravityDomains.domain = PiholeQueries.domain` |
 
+### Read categories through `dbo.vDomainCategory`, never the raw table
+
+`dbo.DomainCategory` is filled by four sources that do not share a vocabulary:
+
+| Source | Calls advertising | Calls gaming | Calls money |
+|--------|-------------------|--------------|-------------|
+| `ut1` (Université Toulouse) | `ads` | `games` | `bank`, `financial`, `bitcoin` |
+| `blp` (Blocklist Project) | `ads` | — | — |
+| `rule` (curated here) | `advertising` | `gaming` | `finance` |
+| `model` (local LLM) | `advertising` | `gaming` | `finance` |
+
+That left **63 distinct values for 34 concepts**, and filtering the raw column
+returned a fraction of the matches while looking like a complete answer:
+
+| Query | Returned | Actual | Missed |
+|-------|----------|--------|--------|
+| `category = 'finance'` | 18 | 354 | **95%** |
+| `category = 'advertising'` | 2,310 | 10,497 | **78%** |
+| `category = 'gaming'` | 227 | 778 | **71%** |
+| `category = 'adult'` | 363 | 577 | 37% |
+
+Nothing errored. The number was simply wrong, and wrong in the direction of
+under-reporting whatever you were worried about.
+
+`dbo.CategoryMap` reconciles the names and `dbo.vDomainCategory` applies it:
+
+```sql
+SELECT c.canonical_category, COUNT_BIG(*) AS queries
+FROM dbo.PiholeQueries AS q
+     JOIN dbo.vDomainCategory AS c ON c.domain = q.domain
+GROUP BY c.canonical_category;
+```
+
+- **`canonical_category`** — filter and group on this. One of 34 values.
+- **`source_category`** — what the corpus called it, kept because "which list
+  said so" is a question in its own right.
+- **`is_unmapped`** — 1 when no mapping exists. An unmapped value passes through
+  as itself rather than being bucketed as `unknown`, so a new corpus category
+  still groups sensibly instead of vanishing somewhere nobody would look.
+
+Only genuine synonyms are merged. `gambling`, `dating` and `shortener` stay
+separate from their nearest neighbours because collapsing them to tidy the list
+would destroy the answer to a question someone actually asks. `threat`
+(fraud/scam/abuse/stalkerware) is kept apart from `malware` (malicious code)
+because the response differs, and `privacy` groups VPN, proxy and DoH since for
+a Pi-hole owner those raise one shared concern: traffic that avoids the filter.
+
+**After every corpus refresh**, re-run `tools/schema/CategoryMap.sql`. Its final
+two queries list any unmapped value and show which concepts were split.
+
 ### Two traps in `DimClient`
 
 **The grain is the IP, not the device.** A phone with an IPv4 lease and several

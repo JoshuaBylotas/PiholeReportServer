@@ -109,7 +109,11 @@ else if (Model.UsingFallback)
 
     <form class="chat-composer" method="post" data-chat-form
           asp-page-handler="Ask" asp-route-c="@Model.ConversationId">
-        <input type="hidden" name="ConversationId" value="@Model.ConversationId" data-chat-id />
+        @* The name comes from the page model so it cannot drift from what the binder
+           expects. A mismatch here binds nothing, silently, and every turn starts a
+           new conversation with no history. *@
+        <input type="hidden" name="@PiholeReportServer.Pages.AnalystModel.ConversationField"
+               value="@Model.ConversationId" data-chat-id />
         <label class="visually-hidden" asp-for="Question">Your question</label>
         <textarea asp-for="Question" data-chat-input rows="1" maxlength="500"
                   placeholder="Ask about your DNS traffic&hellip;"

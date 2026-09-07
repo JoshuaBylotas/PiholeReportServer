@@ -87,12 +87,15 @@ public sealed class IndexModel : PageModel
             WHERE domain <> '' AND ts >= DATEADD(day, -30, SYSUTCDATETIME())
             GROUP BY domain
         )
+        -- vDomainCategory, not DomainCategory: the corpora disagree on names, so
+        -- grouping the raw column showed "ads" and "advertising" as two separate
+        -- slices of the same thing and split the total between them.
         SELECT TOP 10
-               c.category,
+               c.canonical_category AS category,
                SUM(v.queries)                                              AS queries,
                CAST(100.0 * SUM(v.queries) / NULLIF((SELECT SUM(queries) FROM v), 0) AS float) AS share
-        FROM v JOIN dbo.DomainCategory AS c ON c.domain = v.domain
-        GROUP BY c.category
+        FROM v JOIN dbo.vDomainCategory AS c ON c.domain = v.domain
+        GROUP BY c.canonical_category
         ORDER BY SUM(v.queries) DESC;
         """;
 

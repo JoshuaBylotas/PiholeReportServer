@@ -49,7 +49,16 @@ public sealed class AnalystModel : PageModel
         _memory = memory;
     }
 
-    [BindProperty(SupportsGet = true, Name = "c")]
+    /// <summary>
+    /// Request field carrying the conversation id, short because it also appears in
+    /// the URL. Referenced by the view rather than retyped: the form once posted
+    /// "ConversationId" while the binder wanted this, which bound nothing, raised no
+    /// error, and started a fresh conversation on every turn so every follow-up lost
+    /// its history.
+    /// </summary>
+    public const string ConversationField = "c";
+
+    [BindProperty(SupportsGet = true, Name = ConversationField)]
     public string? ConversationId { get; set; }
 
     [BindProperty]

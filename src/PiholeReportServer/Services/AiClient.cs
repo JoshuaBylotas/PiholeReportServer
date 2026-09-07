@@ -92,11 +92,23 @@ public sealed class AiClient
         dbo.DimStatus(status, status_text)
         dbo.GravityDomains(domain, adlist_id) -- one row per (domain, adlist) pair
         dbo.Adlists(id, address, enabled, comment)
-        dbo.DomainCategory(domain, category, subcategory, description, source, confidence)
-          -- what the domain HOSTS. category in: advertising, tracking, analytics,
-          -- infrastructure, cloud, software, streaming, social, shopping, news,
-          -- gaming, iot, finance, adult, malware, communication, search, local,
-          -- work, unknown. source in: manual, rule, ut1, blp, model - prefer
+        dbo.vDomainCategory(domain, canonical_category, source_category, subcategory,
+          description, source, confidence)
+          -- what the domain HOSTS. USE THIS, never dbo.DomainCategory: the four
+          -- corpora that fill it disagree on names (ut1 says "ads", the rules say
+          -- "advertising"), and this view reconciles them. Filtering the raw table
+          -- returns a fraction of the matches and looks like a complete answer -
+          -- "advertising" alone finds 2,310 of 10,497.
+          -- ALWAYS filter and group on canonical_category. It is one of:
+          --   advertising, tracking, analytics, infrastructure, cloud, software,
+          --   streaming, media, sports, social, dating, shopping, news, gaming,
+          --   iot, finance, adult, gambling, drugs, malware, threat, privacy,
+          --   filesharing, shortener, communication, search, local, work,
+          --   education, government, health, travel, ai, unknown.
+          --   threat = fraud/scam/abuse/stalkerware; malware = malicious code.
+          --   privacy = VPN/proxy/DoH, i.e. tools that bypass Pi-hole.
+          -- source_category is what the corpus called it - use it only when asked
+          -- which list said so. source in: manual, rule, ut1, blp, model - prefer
           -- rule/ut1/blp over model when accuracy matters. Join on
           -- dc.domain = q.domain (exact FQDN).
         dbo.DomainMetadata(domain, title, description, http_status, error)
@@ -119,8 +131,8 @@ public sealed class AiClient
         - Count activity from PiholeQueries. DimClient.num_queries is a lifetime
           per-device figure duplicated across IP rows and is not comparable to it.
         - Per-device totals: GROUP BY dc.mac, not dc.ip and not dc.name.
-        - For "what kind of traffic is this", join dbo.DomainCategory rather than
-          guessing from the domain name.
+        - For "what kind of traffic is this", join dbo.vDomainCategory rather than
+          guessing from the domain name, and group on canonical_category.
 
         RETURN ROWS, NOT A SINGLE NUMBER
         - "show me", "list", "what are", "which domains", "top N" all want a TABLE of
@@ -137,7 +149,7 @@ public sealed class AiClient
           dc.name LIKE '%pixel%', never dc.name = 'Pixel'.
         - To find a service by name, filter the QUERY domain:
           q.domain LIKE '%youtube%'. Do not put a domain pattern inside an EXISTS
-          against DomainCategory - that table is for category lookups, and a LIKE on
+          against the category view - that is for category lookups, and a LIKE on
           dc.domain there matches nothing useful.
         - A service spans several domains (youtube.com, ytimg.com, googlevideo.com),
           so prefer grouping the rows and letting the reader see them over guessing

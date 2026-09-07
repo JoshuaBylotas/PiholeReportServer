@@ -43,11 +43,22 @@ public class SchemaPromptTests
     [InlineData("dbo.PiholeQueries")]
     [InlineData("dbo.DimClient")]
     [InlineData("dbo.GravityDomains")]
-    [InlineData("dbo.DomainCategory")]
+    [InlineData("dbo.vDomainCategory")]
     [InlineData("dbo.DomainMetadata")]
     public void Describes_every_table_a_question_is_likely_to_need(string table)
     {
         Assert.Contains(table, Schema);
+    }
+
+    [Fact]
+    public void Directs_category_queries_at_the_reconciled_view()
+    {
+        // The four corpora filling DomainCategory disagree on names - ut1 says
+        // "ads", the rules say "advertising" - so filtering the raw table returns a
+        // fraction of the matches while looking like a complete answer. The view
+        // reconciles them, and the model must be pointed at it.
+        Assert.Contains("canonical_category", Schema);
+        Assert.Contains("never dbo.DomainCategory", Schema);
     }
 
     [Fact]

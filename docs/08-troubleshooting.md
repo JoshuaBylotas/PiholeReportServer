@@ -473,6 +473,55 @@ connection, DNS failure, no route. It does **not** trigger on a timeout or an HT
 error status, because both of those mean a server did answer, and the standby is the
 slower machine: failing over on slowness would only produce a slower failure.
 
+### A category total looks far too low
+
+You filtered `dbo.DomainCategory.category` directly. Four corpora fill that
+column and they disagree on names, so `category = 'advertising'` finds 2,310 of
+10,497 rows and reports it as though that were all of them.
+
+Use `dbo.vDomainCategory` and group on `canonical_category`. See
+[Read categories through dbo.vDomainCategory](01-architecture.md) for the map.
+
+```sql
+-- Wrong: misses "ads", which is what ut1 and blp call the same thing.
+WHERE category = 'advertising'
+
+-- Right.
+WHERE canonical_category = 'advertising'
+```
+
+If a value looks like it is missing entirely, check for an unmapped one:
+
+```sql
+SELECT DISTINCT source_category FROM dbo.vDomainCategory WHERE is_unmapped = 1;
+```
+
+Add it to `tools/schema/CategoryMap.sql` and re-run that script.
+
+### The Analyst forgets the previous turn
+
+A follow-up like "can you order this descending" behaves as though it were the
+first question.
+
+The conversation id is bound from the request field named by
+`AnalystModel.ConversationField`. If the form or the fetch sends a different
+name, **nothing errors** — the property simply stays null, `GetOrStart` begins a
+fresh conversation, and every turn loses its history. That is exactly what
+happened once, with the form posting `ConversationId` while the binder wanted
+`c`.
+
+The view now takes the name from that constant and the script reads the input's
+own `name`, so the three cannot disagree. If follow-ups stop working again,
+check that the POST actually carries the field:
+
+```
+F12 → Network → the ?handler=Ask request → Payload
+```
+
+It must include the conversation id under the same name the page model binds. A
+conversation also expires after two hours idle, and only the last six turns are
+replayed — beyond that, older context is genuinely gone rather than broken.
+
 ### The classifier on PI5-01 cannot reach the inference host
 
 ```

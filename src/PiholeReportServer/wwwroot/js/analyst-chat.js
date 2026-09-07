@@ -297,7 +297,10 @@
 
         var data = new FormData(form);
         data.set("Question", question);
-        if (idField && idField.value) { data.set("ConversationId", idField.value); }
+        // Use the input's own name rather than a literal, so this cannot disagree
+        // with what the server binds. It did once, and the symptom was silent: every
+        // turn began a new conversation and follow-ups lost all context.
+        if (idField && idField.value) { data.set(idField.name, idField.value); }
 
         fetch(form.getAttribute("action") || window.location.pathname + "?handler=Ask", {
             method: "POST",
