@@ -59,6 +59,73 @@ else
     }
 }
 
+@if (Model.Findings.Count > 0)
+{
+    <div class="category-head">
+        <h2>Overnight findings</h2>
+        <span class="rule"></span>
+        <span class="small muted">last 7 nights</span>
+    </div>
+
+    @foreach (var f in Model.Findings)
+    {
+        <div class="card finding finding-@f.Severity">
+            <div class="row">
+                <span class="badge @(f.Severity == "high" ? "badge-gold" : "badge-pine")">@f.Severity</span>
+                <span class="small muted mono">@f.Probe</span>
+                <span class="small muted">@f.CoversDate.ToString("yyyy-MM-dd")</span>
+                <span class="spacer"></span>
+                <form method="post" asp-page-handler="Dismiss" asp-route-id="@f.Id" style="display:inline">
+                    <button type="submit" class="linklike">dismiss</button>
+                </form>
+            </div>
+            <p class="small muted" style="margin:.5rem 0 .35rem">@f.Question</p>
+            <div class="ai-prose">@f.Finding</div>
+            @if (f.SqlUsed is not null)
+            {
+                <details style="margin-top:.6rem">
+                    <summary class="small muted" style="cursor:pointer">Show the query behind this</summary>
+                    <pre class="ai-sql">@f.SqlUsed</pre>
+                </details>
+            }
+        </div>
+    }
+}
+
+@if (Model.Categories.Count > 0)
+{
+    <div class="category-head">
+        <h2>Traffic by content type</h2>
+        <span class="rule"></span>
+        <span class="small muted">
+            last 30 days &mdash; @Model.CategorisedShare.ToString("N1")% categorised
+        </span>
+    </div>
+
+    <div class="card">
+        <div class="cat-bars">
+            @foreach (var c in Model.Categories)
+            {
+                <div class="cat-row">
+                    <span class="cat-name">@c.Category</span>
+                    <span class="cat-bar" aria-hidden="true">
+                        @* Scale to the largest category so the smallest stays visible. *@
+                        <span class="cat-fill"
+                              style="width:@((c.Share / Math.Max(Model.Categories[0].Share, 0.001) * 100).ToString("N1"))%"></span>
+                    </span>
+                    <span class="cat-value">@c.Queries.ToString("N0")</span>
+                    <span class="cat-pct">@c.Share.ToString("N1")%</span>
+                </div>
+            }
+        </div>
+        <p class="small muted" style="margin:.9rem 0 0">
+            Categories come from curated rules, the UT1 and Blocklist Project corpora, and
+            the local model &mdash; see <a href="/Diagnostics">Diagnostics</a> for the split
+            by source.
+        </p>
+    </div>
+}
+
 <div class="card-grid">
     <a class="card" href="/Reports">
         <span class="icon-tile" aria-hidden="true">

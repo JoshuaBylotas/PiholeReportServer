@@ -93,6 +93,11 @@ builder.Services.AddScoped<SavedReportStore>();
 // Typed client so the long inference timeout is scoped to this one dependency
 // rather than applied to every outbound call the app might make.
 builder.Services.AddHttpClient<AiClient>();
+builder.Services.AddScoped<AiAgent>();
+builder.Services.AddScoped<NightlyFindingStore>();
+// Hosted rather than a separate scheduled task: it reuses the same agent, guard and
+// read-only login as the interactive features, so there is one code path to trust.
+builder.Services.AddHostedService<NightlyAnalysisService>();
 
 builder.Services.AddHealthChecks();
 

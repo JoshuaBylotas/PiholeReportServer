@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.RazorPages;
 using PiholeReportServer.Data;
 using PiholeReportServer.Services;
@@ -8,12 +9,18 @@ public sealed class IndexModel : PageModel
 {
     private readonly ReportRunner _runner;
     private readonly ReportCatalog _catalog;
+    private readonly NightlyFindingStore _findings;
     private readonly ILogger<IndexModel> _log;
 
-    public IndexModel(ReportRunner runner, ReportCatalog catalog, ILogger<IndexModel> log)
+    public IndexModel(
+        ReportRunner runner,
+        ReportCatalog catalog,
+        NightlyFindingStore findings,
+        ILogger<IndexModel> log)
     {
         _runner = runner;
         _catalog = catalog;
+        _findings = findings;
         _log = log;
     }
 
@@ -24,6 +31,13 @@ public sealed class IndexModel : PageModel
     public DateTime? OldestQuery { get; private set; }
     public int ReportCount { get; private set; }
     public string? LoadError { get; private set; }
+
+    /// <summary>Traffic by content type, from dbo.DomainCategory.</summary>
+    public IReadOnlyList<(string Category, long Queries, double Share)> Categories { get; private set; } = [];
+
+    public double CategorisedShare { get; private set; }
+
+    public IReadOnlyList<NightlyFinding> Findings { get; private set; } = [];
 
     private const string OverviewSql = """
         SELECT
@@ -59,6 +73,67 @@ public sealed class IndexModel : PageModel
             // leave the rest of the site usable and point at Diagnostics.
             _log.LogWarning(ex, "Overview statistics could not be loaded.");
             LoadError = ex.Message;
+            return;
         }
+
+        await LoadCategoriesAsync(ct);
+        await LoadFindingsAsync(ct);
+    }
+
+    private const string CategorySql = """
+        WITH v AS (
+            SELECT domain, COUNT_BIG(*) AS queries
+            FROM dbo.PiholeQueries
+            WHERE domain <> '' AND ts >= DATEADD(day, -30, SYSUTCDATETIME())
+            GROUP BY domain
+        )
+        SELECT TOP 10
+               c.category,
+               SUM(v.queries)                                              AS queries,
+               CAST(100.0 * SUM(v.queries) / NULLIF((SELECT SUM(queries) FROM v), 0) AS float) AS share
+        FROM v JOIN dbo.DomainCategory AS c ON c.domain = v.domain
+        GROUP BY c.category
+        ORDER BY SUM(v.queries) DESC;
+        """;
+
+    private async Task LoadCategoriesAsync(CancellationToken ct)
+    {
+        try
+        {
+            var r = await _runner.RunAsync(CategorySql, new Dictionary<string, object?>(), 32, ct);
+            var list = new List<(string, long, double)>();
+            var total = 0d;
+            foreach (var row in r.Rows)
+            {
+                var share = row[2] is null ? 0d : Convert.ToDouble(row[2]);
+                total += share;
+                list.Add((row[0]?.ToString() ?? "unknown", Convert.ToInt64(row[1] ?? 0L), share));
+            }
+            Categories = list;
+            CategorisedShare = total;
+        }
+        catch (Exception ex)
+        {
+            // Categorisation is an enhancement; the overview must still render without it.
+            _log.LogWarning(ex, "Category breakdown unavailable.");
+        }
+    }
+
+    private async Task LoadFindingsAsync(CancellationToken ct)
+    {
+        try
+        {
+            Findings = await _findings.GetRecentAsync(days: 7, includeDismissed: false, ct);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "Nightly findings unavailable.");
+        }
+    }
+
+    public async Task<IActionResult> OnPostDismissAsync(int id, CancellationToken ct)
+    {
+        await _findings.DismissAsync(id, User.Identity?.Name, ct);
+        return RedirectToPage();
     }
 }

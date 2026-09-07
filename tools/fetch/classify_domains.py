@@ -194,10 +194,25 @@ def main() -> int:
         batch = work[i:i + args.batch]
         by_domain = {r[0]: r for r in batch}
 
-        try:
-            out = call_model(args.endpoint, args.model, build_prompt(batch), args.timeout)
-        except Exception as exc:                            # noqa: BLE001
-            print(f"[warn] batch at {i} failed: {exc.__class__.__name__}: {exc}", flush=True)
+        # Retry with backoff rather than skipping. A restart of the inference
+        # service used to fail every remaining batch in seconds and burn through
+        # the whole work list: 194 batches were lost that way, because a transient
+        # outage was treated as a permanent per-batch failure.
+        out = None
+        for attempt in range(1, 6):
+            try:
+                out = call_model(args.endpoint, args.model, build_prompt(batch), args.timeout)
+                break
+            except requests.exceptions.RequestException as exc:
+                wait = min(60, 5 * attempt)
+                print(f"[warn] batch at {i} attempt {attempt}/5: "
+                      f"{exc.__class__.__name__}; retrying in {wait}s", flush=True)
+                time.sleep(wait)
+            except Exception as exc:                        # noqa: BLE001
+                print(f"[warn] batch at {i} failed: {exc.__class__.__name__}: {exc}", flush=True)
+                break
+        if out is None:
+            print(f"[warn] batch at {i} abandoned after 5 attempts", flush=True)
             continue
 
         rows = []

@@ -9,6 +9,9 @@ namespace PiholeReportServer.Services;
 
 public sealed record AiSqlSuggestion(string Sql, string? Notes);
 
+/// <summary>One message in a multi-turn exchange with the model.</summary>
+public sealed record AiChatMessage(string Role, string Content);
+
 /// <summary>
 /// Talks to the local Ollama server.
 /// <para>
@@ -54,6 +57,9 @@ public sealed class AiClient
     /// evaluated at roughly 26/sec on the inference host, so every line of schema is
     /// real latency on every question.
     /// </summary>
+    /// <summary>Shared with the agent, so both describe the same schema.</summary>
+    internal const string SchemaForAgent = SchemaPrompt;
+
     private const string SchemaPrompt = """
         You write Microsoft SQL Server (T-SQL) SELECT queries over a Pi-hole DNS warehouse.
         Reply ONLY with JSON: {"sql": "...", "notes": "one short sentence"}
@@ -68,6 +74,15 @@ public sealed class AiClient
         dbo.DimStatus(status, status_text)
         dbo.GravityDomains(domain, adlist_id) -- one row per (domain, adlist) pair
         dbo.Adlists(id, address, enabled, comment)
+        dbo.DomainCategory(domain, category, subcategory, description, source, confidence)
+          -- what the domain HOSTS. category in: advertising, tracking, analytics,
+          -- infrastructure, cloud, software, streaming, social, shopping, news,
+          -- gaming, iot, finance, adult, malware, communication, search, local,
+          -- work, unknown. source in: manual, rule, ut1, blp, model - prefer
+          -- rule/ut1/blp over model when accuracy matters. Join on
+          -- dc.domain = q.domain (exact FQDN).
+        dbo.DomainMetadata(domain, title, description, http_status, error)
+          -- what the site itself served, fetched directly.
 
         RULES
         - One SELECT statement. Never INSERT, UPDATE, DELETE, DROP, EXEC, MERGE or INTO.
@@ -78,6 +93,8 @@ public sealed class AiClient
           it holds one row per (domain, adlist) and a join multiplies the counts.
         - reply_time is seconds; multiply by 1000 to report milliseconds.
         - Prefer COUNT_BIG(*) over COUNT(*) on this table.
+        - For "what kind of traffic is this", join dbo.DomainCategory rather than
+          guessing from the domain name.
         """;
 
     /// <summary>Turns a plain-English question into candidate SQL. Never executes it.</summary>
@@ -165,6 +182,53 @@ public sealed class AiClient
         };
 
         return (await PostAsync(request, ct)).Trim();
+    }
+
+    /// <summary>
+    /// One turn of a multi-turn exchange, returning the raw JSON reply. Used by the
+    /// agent, which needs the model to see its own earlier queries and their results.
+    /// </summary>
+    public async Task<string> ChatJsonAsync(
+        IReadOnlyList<AiChatMessage> messages, TimeSpan timeout, CancellationToken ct = default)
+    {
+        EnsureEnabled();
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        if (timeout > TimeSpan.Zero)
+        {
+            cts.CancelAfter(timeout);
+        }
+
+        var request = new OllamaChat
+        {
+            Model = _opt.Model,
+            Messages = messages.Select(m => new OllamaMessage { Role = m.Role, Content = m.Content }).ToList(),
+            Stream = false,
+            Format = "json",
+            Options = new OllamaOptions
+            {
+                Temperature = _opt.Temperature,
+                NumPredict = _opt.MaxOutputTokens,
+            },
+        };
+
+        try
+        {
+            using var resp = await _http.PostAsJsonAsync("api/chat", request, Json, cts.Token);
+            if (!resp.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(
+                    $"The inference server returned HTTP {(int)resp.StatusCode} on chat.");
+            }
+            var payload = await resp.Content.ReadFromJsonAsync<OllamaChatResponse>(Json, cts.Token);
+            return payload?.Message?.Content ?? "";
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                "The inference server ran out of time on this step. It runs on CPU, so a " +
+                "complex question can exceed the budget - try a narrower one.");
+        }
     }
 
     /// <summary>Availability probe for the diagnostics page.</summary>
@@ -271,6 +335,26 @@ public sealed class AiClient
     {
         [JsonPropertyName("temperature")] public double Temperature { get; set; }
         [JsonPropertyName("num_predict")] public int NumPredict { get; set; }
+    }
+
+    private sealed class OllamaChat
+    {
+        [JsonPropertyName("model")] public string Model { get; set; } = "";
+        [JsonPropertyName("messages")] public List<OllamaMessage> Messages { get; set; } = [];
+        [JsonPropertyName("stream")] public bool Stream { get; set; }
+        [JsonPropertyName("format")] public string? Format { get; set; }
+        [JsonPropertyName("options")] public OllamaOptions? Options { get; set; }
+    }
+
+    private sealed class OllamaMessage
+    {
+        [JsonPropertyName("role")] public string Role { get; set; } = "";
+        [JsonPropertyName("content")] public string Content { get; set; } = "";
+    }
+
+    private sealed class OllamaChatResponse
+    {
+        [JsonPropertyName("message")] public OllamaMessage? Message { get; set; }
     }
 
     private sealed class OllamaResponse

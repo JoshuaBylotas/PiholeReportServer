@@ -748,3 +748,79 @@ table.data tbody tr[hidden] { display: none; }
   white-space: pre-wrap;
   overflow-x: auto;
 }
+
+/* -- Agent trace --------------------------------------------------------- */
+
+.agent-step { margin-bottom: 1rem; }
+
+.step-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid var(--gold-400);
+  font-family: var(--font-serif);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--pine-700);
+}
+
+.agent-step details > summary { margin-top: 0.5rem; }
+
+.example-list {
+  margin: 0.75rem 0 1rem;
+  padding-left: 1.1rem;
+  font-size: 0.875rem;
+  color: color-mix(in srgb, var(--charcoal) 75%, transparent);
+}
+
+.example-list li { margin-bottom: 0.35rem; }
+
+/* -- Category bars ------------------------------------------------------- */
+
+.cat-bars { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.cat-row {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr 5.5rem 3.5rem;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+}
+
+.cat-name { font-weight: 500; text-transform: capitalize; }
+
+.cat-bar {
+  display: block;
+  height: 0.6rem;
+  border-radius: var(--radius-full);
+  background-color: var(--cream-dark);
+  overflow: hidden;
+}
+
+.cat-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-full);
+  background-color: var(--pine-500);
+}
+
+.cat-value, .cat-pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--charcoal) 70%, transparent);
+}
+
+@media (max-width: 620px) {
+  .cat-row { grid-template-columns: 7rem 1fr 4.5rem; }
+  .cat-pct { display: none; }
+}
+
+/* -- Findings ------------------------------------------------------------ */
+
+.finding { margin-bottom: 0.9rem; border-left: 3px solid var(--pine-300); }
+.finding-high { border-left-color: var(--gold-500); }
+.finding-low { border-left-color: color-mix(in srgb, var(--charcoal) 15%, transparent); }
