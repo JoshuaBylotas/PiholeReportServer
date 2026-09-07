@@ -35,7 +35,9 @@
 #>
 [CmdletBinding()]
 param(
-    [string[]]$AllowFrom = @('10.20.0.15', '10.20.0.16'),
+    # The report server's two addresses, plus PI5-01's two - the Pi fetches domain
+# content and calls the model to classify it, so it is a client as well.
+[string[]]$AllowFrom = @('10.20.0.15', '10.20.0.16', '10.20.0.173', '10.20.0.174'),
     [string]$Model = 'qwen2.5:14b-instruct',
     [string]$InstallDir = 'C:\Ollama'
 )

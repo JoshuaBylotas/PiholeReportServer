@@ -25,8 +25,10 @@
 set -euo pipefail
 
 MODEL="${MODEL:-qwen2.5:14b-instruct}"
-# The report server's two addresses. Space-separated; empty to skip firewalling.
-ALLOW_FROM="${ALLOW_FROM-10.20.0.15 10.20.0.16}"
+# The report server's two addresses, plus PI5-01's two - the Pi fetches domain
+# content and calls the model to classify it, so it is a client as well.
+# Space-separated; empty to skip firewalling.
+ALLOW_FROM="${ALLOW_FROM-10.20.0.15 10.20.0.16 10.20.0.173 10.20.0.174}"
 
 step() { printf '\n=== %s ===\n' "$1"; }
 ok()   { printf '  OK   %s\n' "$1"; }

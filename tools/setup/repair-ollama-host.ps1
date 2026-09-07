@@ -116,8 +116,19 @@ if (Get-ScheduledTask -TaskName 'Ollama' -ErrorAction SilentlyContinue) {
 # server, and it respawns "ollama.exe serve" if it is left running.
 Get-Process -Name 'ollama app', 'ollama_llama_server', 'ollama' -ErrorAction SilentlyContinue |
     ForEach-Object {
-        try { Stop-Process -Id $_.Id -Force -ErrorAction Stop; Ok "killed pid $($_.Id) ($($_.ProcessName))" }
-        catch { Warn "could not kill pid $($_.Id): $($_.Exception.Message)" }
+        # Capture these first: stopping the scheduled task above may already have
+        # taken this process down, and an exited object no longer reports its own
+        # Id, which turned the failure message into "could not kill pid :".
+        $pid_ = $_.Id; $pname = $_.ProcessName
+        if ($_.HasExited) { Ok "pid $pid_ ($pname) already exited with the task"; return }
+        try { Stop-Process -Id $pid_ -Force -ErrorAction Stop; Ok "killed pid $pid_ ($pname)" }
+        catch {
+            if (-not (Get-Process -Id $pid_ -ErrorAction SilentlyContinue)) {
+                Ok "pid $pid_ ($pname) exited on its own"
+            } else {
+                Warn "could not kill pid $pid_ ($pname): $($_.Exception.Message)"
+            }
+        }
     }
 
 foreach ($i in 1..15) {
@@ -271,6 +282,22 @@ try {
 #     UNTIL means the environment block never reached the server process, which
 #     would mean OLLAMA_MODELS and OLLAMA_HOST are wrong too.
 Step 'Benchmark'
+
+# Warm the model first. On a cold server the first request's timings include the
+# model load - a 9.6 GB read showed up as "39 prompt tokens at 2.1 tok/s", which
+# reads as a catastrophic fault rather than the disk I/O it actually was.
+Write-Host '  loading the model (a cold load takes 15-35s and is not measured)...'
+try {
+    Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/generate' -Method Post -TimeoutSec 900 `
+      -ContentType 'application/json' `
+      -Body (@{ model = $Model; prompt = 'hi'; stream = $false
+                options = @{ num_predict = 1 } } | ConvertTo-Json) | Out-Null
+    Ok 'model resident'
+} catch {
+    Bad "could not load the model: $($_.Exception.Message)"
+    $fail++
+}
+
 $body = @{ model = $Model; stream = $false
            prompt = 'Write one paragraph explaining what a DNS resolver does.'
            options = @{ num_predict = 200; temperature = 0.1 } } | ConvertTo-Json

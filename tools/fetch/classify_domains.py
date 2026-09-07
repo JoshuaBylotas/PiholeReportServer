@@ -160,8 +160,8 @@ WHEN NOT MATCHED THEN
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--config", default="/etc/pihole-fetch/config.ini")
-    ap.add_argument("--endpoint", default="http://10.20.0.14:11434")
-    ap.add_argument("--model", default="qwen2.5:7b-instruct")
+    ap.add_argument("--endpoint", default="http://10.20.0.139:11434")
+    ap.add_argument("--model", default="qwen2.5:14b-instruct")
     ap.add_argument("--batch", type=int, default=15)
     ap.add_argument("--limit", type=int, default=0, help="0 = everything outstanding")
     ap.add_argument("--timeout", type=int, default=300)
