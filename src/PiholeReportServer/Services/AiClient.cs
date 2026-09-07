@@ -104,7 +104,12 @@ public sealed class AiClient
 
         RULES
         - One SELECT statement. Never INSERT, UPDATE, DELETE, DROP, EXEC, MERGE or INTO.
-        - Always bound the result with TOP (n).
+        - Always bound the result with TOP (n), written IMMEDIATELY after SELECT:
+          "SELECT TOP (10) domain, COUNT_BIG(*) AS n ... GROUP BY domain ORDER BY n DESC".
+          T-SQL has no trailing LIMIT and no trailing TOP; putting TOP after GROUP BY
+          is a syntax error.
+        - A ranked list needs ORDER BY, and TOP without ORDER BY returns an arbitrary
+          n rows. Always order a "top N" by the count, descending.
         - ts is UTC: use DATEADD(day, -n, SYSUTCDATETIME()) for relative ranges.
         - Statuses: blocked = 1,4,5,9,10,11; cache = 3,17; forwarded = 2.
         - Test blocklist membership with EXISTS against GravityDomains, never a join:
@@ -116,6 +121,27 @@ public sealed class AiClient
         - Per-device totals: GROUP BY dc.mac, not dc.ip and not dc.name.
         - For "what kind of traffic is this", join dbo.DomainCategory rather than
           guessing from the domain name.
+
+        RETURN ROWS, NOT A SINGLE NUMBER
+        - "show me", "list", "what are", "which domains", "top N" all want a TABLE of
+          rows. Return the rows. Asked for "all the youtube traffic", answer with the
+          domains and their counts, NOT SELECT COUNT_BIG(*) - one number is not a list
+          and the person asking cannot see anything in it.
+        - Use COUNT_BIG(*) as a COLUMN alongside the thing being counted, not as the
+          only column. Return the grouping key too.
+        - Only return a bare scalar when the question is genuinely "how many".
+
+        MATCHING NAMES AND DOMAINS
+        - Device names are full hostnames like 'Pixel-9-Pro-XL' or 'WINSERVER01'. A
+          person naming a device will not type it exactly, so match with
+          dc.name LIKE '%pixel%', never dc.name = 'Pixel'.
+        - To find a service by name, filter the QUERY domain:
+          q.domain LIKE '%youtube%'. Do not put a domain pattern inside an EXISTS
+          against DomainCategory - that table is for category lookups, and a LIKE on
+          dc.domain there matches nothing useful.
+        - A service spans several domains (youtube.com, ytimg.com, googlevideo.com),
+          so prefer grouping the rows and letting the reader see them over guessing
+          one domain.
         """;
 
     /// <summary>Turns a plain-English question into candidate SQL. Never executes it.</summary>

@@ -59,40 +59,102 @@ public sealed class AiAgent
         PropertyNameCaseInsensitive = true,
     };
 
-    private string SystemPrompt => $$"""
-        You are a DNS traffic analyst with read-only SQL access to a Pi-hole warehouse.
-        Answer the user's question by querying, reading the results, and reasoning.
+    private string SystemPrompt => SystemPromptWith("");
+
+    private string SystemPromptWith(string memory) => $$"""
+        You are talking with the owner of a home network about their DNS traffic. You
+        have read-only SQL access to a Pi-hole warehouse. Be conversational: you are
+        an assistant they are chatting with, not a query generator.
 
         Reply with ONLY a JSON object, one of two shapes:
 
           {"action":"query","reasoning":"why this query","sql":"SELECT ..."}
-          {"action":"answer","answer":"your conclusion, citing the actual figures"}
+          {"action":"answer","answer":"what you found, in a sentence or two"}
+
+        Always include the "action" field. A reply without it cannot be read.
 
         {{AiClient.SchemaForAgent}}
 
+        {{memory}}
+
         HOW TO WORK
-        - Start with the query that most directly addresses the question.
+        - Start with the query that most directly addresses what they asked.
         - You will be shown a sample of the rows and exact totals. Use those figures.
-        - Issue another query only if you genuinely need more to answer. You have at
-          most {{MaxSteps}} queries.
-        - When you have enough, answer. Quote real numbers from the results; never
-          estimate or invent one.
-        - If the results show the question cannot be answered from this data, say so
-          plainly rather than guessing.
-        - Keep the answer under 150 words.
+        - Issue another query only if you genuinely need more. You have at most
+          {{MaxSteps}} queries.
+        - When you have enough, answer.
+
+        WHAT AN ANSWER SHOULD BE
+        - The rows from your last query are shown to them as a table, in full, under
+          your answer. They can read it. So do not list the rows back to them and do
+          not recite every value.
+        - Instead say what the table shows: the headline figure, what stands out, and
+          anything surprising. Two or three sentences is usually right, and never
+          more than 150 words.
+        - Quote real numbers from the results. Never estimate or invent one.
+        - If they asked to SEE something, the table is the answer and your job is a
+          short introduction to it. Make sure your final query returns the rows they
+          wanted rather than a count of them.
+        - If the data cannot answer the question, say so plainly and say what is
+          missing, rather than guessing.
+
+        FOLLOWING UP
+        - Earlier turns of this conversation are above. "That device", "those
+          domains", "the same but for last month" all refer back to them - resolve
+          the reference yourself and query accordingly rather than asking what they
+          meant.
+        - If a request really is ambiguous, make the most reasonable assumption,
+          answer, and say which assumption you made.
         """;
 
-    public async Task<AgentRun> RunAsync(string question, CancellationToken ct)
+    public Task<AgentRun> RunAsync(string question, CancellationToken ct) =>
+        RunAsync(question, [], "", ct);
+
+    public Task<AgentRun> RunAsync(
+        string question, IReadOnlyList<ConversationTurn> history, CancellationToken ct) =>
+        RunAsync(question, history, "", ct);
+
+    /// <summary>
+    /// Answers a question, optionally continuing an existing conversation.
+    /// <para>
+    /// <paramref name="history"/> is replayed ahead of the question so a follow-up
+    /// like "now just for that device" resolves without the user restating anything.
+    /// </para>
+    /// </summary>
+    /// <param name="memory">
+    /// Standing facts rendered by <see cref="AnalystMemoryStore.Render"/>, so the model
+    /// knows things like which hostname "Jason's phone" refers to. Empty when there are
+    /// none, in which case the prompt simply has no memory section.
+    /// </param>
+    public async Task<AgentRun> RunAsync(
+        string question,
+        IReadOnlyList<ConversationTurn> history,
+        string memory,
+        CancellationToken ct)
     {
         var run = new AgentRun { Question = question, Model = _ai.Model };
         var sw = Stopwatch.StartNew();
         var budget = TimeSpan.FromSeconds(Math.Max(60, _opt.AgentBudgetSeconds));
 
-        var messages = new List<AiChatMessage>
+        var messages = new List<AiChatMessage> { new("system", SystemPromptWith(memory)) };
+
+        // Replay earlier turns as the exchange they actually were: the question, the
+        // model's own JSON decisions, and the digests it was shown. Feeding back its
+        // own words rather than a summary is what lets it refer to them accurately.
+        foreach (var turn in history)
         {
-            new("system", SystemPrompt),
-            new("user", question),
-        };
+            messages.Add(new AiChatMessage("user", turn.Question));
+            for (var i = 0; i < turn.ModelReplies.Count; i++)
+            {
+                messages.Add(new AiChatMessage("assistant", turn.ModelReplies[i]));
+                if (i < turn.Observations.Count)
+                {
+                    messages.Add(new AiChatMessage("user", turn.Observations[i]));
+                }
+            }
+        }
+
+        messages.Add(new AiChatMessage("user", question));
 
         try
         {
@@ -109,12 +171,43 @@ public sealed class AiAgent
                 var remaining = budget - sw.Elapsed;
                 var reply = await _ai.ChatJsonAsync(messages, remaining, ct);
                 messages.Add(new AiChatMessage("assistant", reply));
+                run.ModelReplies.Add(reply);
 
                 var decision = Parse(reply);
                 if (decision is null)
                 {
                     run.Outcome = AgentOutcome.Error;
-                    run.Error = "The model's reply could not be read. Try rephrasing the question.";
+                    run.Error = "The model's reply could not be read as JSON. Try rephrasing the question.";
+                    break;
+                }
+
+                // A reply with neither an answer nor SQL is a dead end. Saying so and
+                // asking again beats returning nothing, which is what used to happen:
+                // the loop would fall through to the "no SQL" error and stop.
+                if (string.IsNullOrWhiteSpace(decision.Answer) &&
+                    string.IsNullOrWhiteSpace(decision.Sql) &&
+                    string.IsNullOrWhiteSpace(decision.Fact))
+                {
+                    messages.Add(new AiChatMessage("user",
+                        "That reply had neither \"sql\" nor \"answer\". Reply with one of the two " +
+                        "shapes described, including the \"action\" field."));
+                    continue;
+                }
+
+                // Being told a fact is not a query. Recorded on the run and persisted by
+                // the caller, which owns the signed-in identity the row is scoped to.
+                if (decision.Action == "remember" || decision.Action == "forget")
+                {
+                    run.MemoryRequest = new AgentMemoryRequest
+                    {
+                        Forget = decision.Action == "forget",
+                        Kind = string.IsNullOrWhiteSpace(decision.Kind) ? "note" : decision.Kind!,
+                        Subject = decision.Subject,
+                        Target = decision.Target,
+                        Fact = string.IsNullOrWhiteSpace(decision.Fact) ? decision.Answer : decision.Fact,
+                    };
+                    run.Answer = decision.Answer?.Trim();
+                    run.Outcome = AgentOutcome.Answered;
                     break;
                 }
 
@@ -193,7 +286,9 @@ public sealed class AiAgent
                     Result = result,
                 });
 
-                messages.Add(new AiChatMessage("user", Present(result)));
+                var observation = Present(result);
+                messages.Add(new AiChatMessage("user", observation));
+                run.Observations.Add(observation);
 
                 if (step == MaxSteps)
                 {
@@ -202,6 +297,7 @@ public sealed class AiAgent
                     messages.Add(new AiChatMessage("user",
                         "That was your last query. Answer now from what you have, with the action \"answer\"."));
                     var final = await _ai.ChatJsonAsync(messages, budget - sw.Elapsed, ct);
+                    run.ModelReplies.Add(final);
                     var last = Parse(final);
                     run.Answer = last?.Answer?.Trim();
                     run.Outcome = run.HasAnswer ? AgentOutcome.Answered : AgentOutcome.StepLimit;
@@ -283,6 +379,13 @@ public sealed class AiAgent
         public string? Reasoning { get; set; }
         public string? Sql { get; set; }
         public string? Answer { get; set; }
+
+        // Present when the model is being told a standing fact rather than asked a
+        // question: "the Pixel is Jason's phone".
+        public string? Kind { get; set; }
+        public string? Subject { get; set; }
+        public string? Target { get; set; }
+        public string? Fact { get; set; }
     }
 
     private Decision? Parse(string reply)

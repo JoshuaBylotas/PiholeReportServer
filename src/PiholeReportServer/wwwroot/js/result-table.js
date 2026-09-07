@@ -201,8 +201,17 @@
         load(0);
     }
 
-    function init() {
-        document.querySelectorAll("[data-result-root]").forEach(function (root) {
+    /* Optionally scoped, so a table added to the page after load - the Analyst
+       chat appends one per answer - can be wired up without rescanning the whole
+       document and without re-binding tables that are already live. */
+    function init(scope) {
+        var host = scope || document;
+        host.querySelectorAll("[data-result-root]").forEach(function (root) {
+            // Binding twice would attach a second set of listeners and fire two
+            // fetches per keystroke.
+            if (root.hasAttribute("data-result-bound")) { return; }
+            root.setAttribute("data-result-bound", "1");
+
             var toolbar = root.querySelector("[data-result-toolbar]");
             if (toolbar) { toolbar.hidden = false; }
 
@@ -215,8 +224,10 @@
         });
     }
 
+    window.ResultTable = { init: init };
+
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", init);
+        document.addEventListener("DOMContentLoaded", function () { init(); });
     } else {
         init();
     }

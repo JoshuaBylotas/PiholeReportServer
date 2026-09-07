@@ -93,6 +93,10 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ClientDirectory>();
 builder.Services.AddScoped<AdlistDirectory>();
 builder.Services.AddScoped<SavedReportStore>();
+// Standing facts for the Analyst - which hostname "Jason's phone" means. Scoped
+// like the other SQL-backed stores; the facts live in the database, not in memory,
+// because being taught something once should survive a recycle.
+builder.Services.AddScoped<AnalystMemoryStore>();
 // Singleton: it remembers that the preferred inference host is unreachable, and
 // that has to outlive one request or every request pays the connect timeout again.
 builder.Services.AddSingleton<AiEndpointSelector>();
@@ -110,6 +114,9 @@ builder.Services.AddHttpClient<AiClient>()
         PooledConnectionLifetime = TimeSpan.FromMinutes(5),
     });
 builder.Services.AddScoped<AiAgent>();
+// Singleton, like ResultCache: an Analyst conversation has to outlive the request
+// that added a turn to it, or every follow-up would start from nothing.
+builder.Services.AddSingleton<ConversationStore>();
 builder.Services.AddScoped<NightlyFindingStore>();
 // Hosted rather than a separate scheduled task: it reuses the same agent, guard and
 // read-only login as the interactive features, so there is one code path to trust.

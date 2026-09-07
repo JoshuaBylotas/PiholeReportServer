@@ -1,0 +1,120 @@
+@model PiholeReportServer.Models.ConversationTurn
+@using PiholeReportServer.Models
+@inject Microsoft.Extensions.Options.IOptions<PiholeReportServer.Configuration.ReportingOptions> Reporting
+
+@*
+    One exchange, rendered server-side. The browser builds the same shape for a turn
+    it just received, so this is what a reloaded conversation looks like and the two
+    have to stay in step.
+*@
+
+<div class="chat-turn">
+    <div class="chat-msg chat-msg-user">
+        <div class="chat-bubble">@Model.Question</div>
+    </div>
+
+    <div class="chat-msg chat-msg-ai">
+        <span class="icon-tile ai-icon" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 3v3" /><path d="M12 18v3" /><path d="M3 12h3" /><path d="M18 12h3" />
+                <circle cx="12" cy="12" r="4" />
+            </svg>
+        </span>
+
+        <div class="chat-body">
+            @if (Model.HasAnswer)
+            {
+                <div class="ai-prose">@Model.Answer</div>
+            }
+
+            @if (Model.Error is not null)
+            {
+                <div class="notice notice-error">
+                    <strong>That did not complete.</strong> @Model.Error
+                </div>
+            }
+            else if (!Model.HasAnswer)
+            {
+                <div class="notice notice-warn">
+                    @switch (Model.Outcome)
+                    {
+                        case AgentOutcome.StepLimit:
+                            <text>It ran out of queries before reaching a conclusion. The table below is what it found.</text>
+                            break;
+                        case AgentOutcome.Timeout:
+                            <text>It ran out of time. The table below is what it found.</text>
+                            break;
+                        default:
+                            <text>It finished without an answer.</text>
+                            break;
+                    }
+                </div>
+            }
+
+            @* The rows are the point for anything phrased as "show me", so they sit
+               under the answer rather than behind a disclosure triangle. *@
+            @if (Model.Result is not null && Model.Result.Rows.Count > 0)
+            {
+                <div class="chat-table">
+                    <partial name="Shared/_ResultTable"
+                             model="ResultTableViewModel.For(Model.Result, Model.ResultToken, Reporting.Value.PageSize)" />
+                </div>
+            }
+
+            <div class="chat-meta small muted">
+                <span>@Model.SuccessfulQueries quer@(Model.SuccessfulQueries == 1 ? "y" : "ies")</span>
+                <span>@Model.Elapsed.TotalSeconds.ToString("N0")s</span>
+                @if (Model.Model is not null)
+                {
+                    <span class="mono">@Model.Model</span>
+                }
+            </div>
+
+            @if (Model.Steps.Count > 0)
+            {
+                <details class="chat-steps">
+                    <summary class="small muted">
+                        Show the @Model.Steps.Count quer@(Model.Steps.Count == 1 ? "y" : "ies") it ran
+                    </summary>
+                    @foreach (var step in Model.Steps)
+                    {
+                        <div class="agent-step">
+                            <div class="row">
+                                <span class="step-number">@step.Number</span>
+                                @switch (step.Kind)
+                                {
+                                    case AgentStepKind.Query:
+                                        <span class="badge badge-pine">
+                                            @step.RowCount.ToString("N0") row@(step.RowCount == 1 ? "" : "s")
+                                        </span>
+                                        break;
+                                    case AgentStepKind.Refused:
+                                        <span class="badge badge-gold">Refused by the guard</span>
+                                        break;
+                                    default:
+                                        <span class="badge badge-gold">Query failed</span>
+                                        break;
+                                }
+                                <span class="spacer"></span>
+                                @if (step.Elapsed > TimeSpan.Zero)
+                                {
+                                    <span class="small muted">@step.Elapsed.TotalMilliseconds.ToString("N0") ms</span>
+                                }
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(step.Reasoning))
+                            {
+                                <p class="small muted" style="margin:.5rem 0 0">@step.Reasoning</p>
+                            }
+                            <pre class="ai-sql">@step.Sql</pre>
+                            @if (step.Problem is not null)
+                            {
+                                <div class="notice notice-warn" style="margin-bottom:0">@step.Problem</div>
+                            }
+                        </div>
+                    }
+                </details>
+            }
+        </div>
+    </div>
+</div>

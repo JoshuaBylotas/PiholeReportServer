@@ -824,3 +824,176 @@ table.data tbody tr[hidden] { display: none; }
 .finding { margin-bottom: 0.9rem; border-left: 3px solid var(--pine-300); }
 .finding-high { border-left-color: var(--gold-500); }
 .finding-low { border-left-color: color-mix(in srgb, var(--charcoal) 15%, transparent); }
+
+/* -- Analyst chat -------------------------------------------------------- */
+
+/* The Analyst is a conversation, not a form: the transcript is the page, and the
+   composer stays put at the bottom of it. */
+.chat { display: flex; flex-direction: column; gap: 1rem; }
+
+.chat-transcript { display: flex; flex-direction: column; gap: 1.5rem; }
+
+.chat-turn { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.chat-msg { display: flex; gap: 0.6rem; }
+
+/* The question sits right, the answer left, which is the convention people
+   already read without being told. */
+.chat-msg-user { justify-content: flex-end; }
+
+.chat-bubble {
+  max-width: min(46rem, 85%);
+  padding: 0.6rem 0.9rem;
+  border-radius: 14px 14px 4px 14px;
+  background: var(--pine-600);
+  color: var(--cream);
+  font-size: 0.9375rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.chat-msg-ai .icon-tile { flex: 0 0 auto; margin-top: 0.15rem; }
+
+.chat-body {
+  flex: 1 1 auto;
+  min-width: 0;              /* lets a wide table scroll instead of stretching the row */
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.chat-thinking { display: flex; align-items: center; gap: 0.6rem; }
+
+.spinner {
+  width: 1rem; height: 1rem;
+  flex: 0 0 auto;
+  border: 2px solid var(--pine-200);
+  border-top-color: var(--pine-600);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Respect a reduced-motion preference: show a static ring rather than spinning. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; border-top-color: var(--pine-400); }
+}
+
+.chat-table {
+  border: 1px solid var(--pine-100);
+  border-radius: 10px;
+  padding: 0.75rem;
+  background: var(--cream);
+  overflow: hidden;          /* keeps the table's own scroller inside the radius */
+}
+
+.chat-meta { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; }
+
+.chat-steps > summary { cursor: pointer; }
+.chat-steps[open] { margin-top: 0.25rem; }
+.chat-steps .agent-step { margin-top: 0.75rem; }
+
+.chat-composer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+  padding: 0.75rem 0;
+  background: linear-gradient(to top, var(--cream) 70%, transparent);
+}
+
+.chat-composer textarea {
+  flex: 1 1 auto;
+  resize: none;
+  min-height: 2.6rem;
+  max-height: 10rem;
+  padding: 0.65rem 0.8rem;
+  font: inherit;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  border: 1px solid var(--pine-200);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.chat-composer textarea:focus { border-color: var(--pine-500); }
+
+.chat-composer button { flex: 0 0 auto; min-width: 6rem; }
+
+.chat-busy .chat-composer textarea { background: var(--pine-50); }
+
+.chat-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.chat-foot form { display: inline; }
+
+.chat-intro h3 { margin-top: 0; }
+
+.chat-suggestions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; }
+
+.chip {
+  padding: 0.4rem 0.75rem;
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  color: var(--pine-700);
+  background: var(--pine-50);
+  border: 1px solid var(--pine-100);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chip:hover { background: var(--pine-100); border-color: var(--pine-200); }
+
+.btn-link {
+  padding: 0;
+  font: inherit;
+  color: var(--pine-600);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.btn-link:hover { color: var(--pine-800); }
+
+/* -- Analyst memory ------------------------------------------------------ */
+
+.memory-panel { margin-bottom: 1rem; }
+.memory-panel > summary { cursor: pointer; display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; }
+
+.memory-list { list-style: none; margin: 0.9rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+
+.memory-list li {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--pine-50);
+}
+
+.memory-list li:last-child { border-bottom: 0; }
+.memory-list form { margin-left: auto; }
+.memory-fact { flex: 1 1 14rem; font-size: 0.9375rem; }
+
+.memory-add { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.9rem; }
+
+.memory-add input {
+  flex: 1 1 14rem;
+  min-width: 0;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  font-size: 0.875rem;
+  border: 1px solid var(--pine-200);
+  border-radius: 8px;
+}
+
+.memory-add input:focus { border-color: var(--pine-500); }

@@ -8,10 +8,9 @@
     <span class="eyebrow">AI analysis</span>
     <h1>Analyst</h1>
     <p class="lede">
-        Ask a question and the model investigates it &mdash; writing a query, reading the
-        result, and following up if it needs more, up to @Model.MaxSteps queries. Every
-        query it runs is shown, so you can check the reasoning rather than take the
-        conclusion on trust.
+        Ask about your DNS traffic in plain language and keep talking &mdash; follow-ups
+        like &ldquo;now just for that device&rdquo; carry the context forward. The rows it
+        finds are shown in full under each answer, and so is every query it ran.
     </p>
 </div>
 
@@ -28,164 +27,114 @@ else if (Model.UsingFallback)
         <strong>Running on the standby inference host.</strong>
         The preferred host is unreachable, so questions are being answered by
         <span class="mono">@Model.Model</span> on <span class="mono">@Model.ActiveEndpoint</span>.
-        Answers are still sound but noticeably slower, and a long investigation is
-        more likely to run out of time. It switches back on its own once the
-        preferred host returns.
+        Answers are still sound but noticeably slower, and a long investigation is more
+        likely to run out of time. It switches back on its own once the preferred host
+        returns.
     </div>
 }
 
-<form method="post" class="card">
-    <div class="field">
-        <label asp-for="Question">Your question</label>
-        <input asp-for="Question" type="text" maxlength="500"
-               placeholder="e.g. which device generates the most tracking traffic this week?"
-               autocomplete="off" />
-        <span class="help">
-            Runs on your own hardware, on <span class="mono">@Model.Model</span>. Each step
-            is a generation plus a database query, with a ceiling of
-            @Model.BudgetSeconds seconds for the whole investigation.
-        </span>
-    </div>
+@* What it thinks it knows, on the page. An assistant that silently remembers a
+   wrong fact is worse than one that remembers nothing, because every later answer
+   inherits the error - so this is visible and correctable, not hidden state. *@
+<details class="card memory-panel" data-memory-panel @(Model.Facts.Count == 0 ? "" : "open")>
+    <summary>
+        <strong>What I remember</strong>
+        <span class="badge badge-pine" data-memory-count>@Model.Facts.Count</span>
+        <span class="small muted">&mdash; tell me things like &ldquo;the Pixel is Josh&rsquo;s phone&rdquo;</span>
+    </summary>
 
-    <div class="form-actions">
-        <button type="submit" class="btn btn-primary" disabled="@(!Model.Enabled)">Investigate</button>
-    </div>
+    <ul class="memory-list" data-memory-list>
+        @foreach (var f in Model.Facts)
+        {
+            <li>
+                <span class="badge @(f.IsDevice ? "badge-pine" : "badge-gold")">@(f.IsDevice ? "device" : "note")</span>
+                <span class="memory-fact">@f.Fact</span>
+                @if (f.Target is not null)
+                {
+                    <span class="mono small muted">@f.Target</span>
+                }
+                <form method="post" asp-page-handler="Forget" asp-route-id="@f.Id"
+                      asp-route-c="@Model.ConversationId">
+                    <button type="submit" class="btn-link small" aria-label="Forget this">Forget</button>
+                </form>
+            </li>
+        }
+        @if (Model.Facts.Count == 0)
+        {
+            <li class="small muted" data-memory-empty>
+                Nothing yet. Say &ldquo;remember that the Pixel is Josh&rsquo;s phone&rdquo; in the chat,
+                or add one below.
+            </li>
+        }
+    </ul>
 
-    <div asp-validation-summary="All" class="notice notice-error" style="margin-top:1rem"></div>
-</form>
+    <form method="post" asp-page-handler="Remember" asp-route-c="@Model.ConversationId"
+          class="memory-add">
+        <input type="text" name="subject" maxlength="100" required
+               placeholder="What I should call it, e.g. Jason's phone" />
+        <input type="text" name="target" maxlength="255"
+               placeholder="Hostname, IP or MAC (leave blank for a general note)" />
+        <button type="submit" class="btn btn-secondary btn-compact">Remember</button>
+    </form>
+</details>
 
-@if (Model.Run is null)
-{
-    <div class="card" style="margin-top:1.5rem">
-        <h3>Things worth asking</h3>
-        <ul class="example-list">
-            @foreach (var ex in PiholeReportServer.Pages.AnalystModel.Examples)
+<div class="chat" data-chat data-page-size="@Model.PageSize">
+
+    <div class="chat-transcript" data-chat-transcript>
+        @if (Model.Conversation is null || Model.Conversation.Turns.Count == 0)
+        {
+            <div class="card chat-intro" data-chat-intro>
+                <h3>Ask me about your network</h3>
+                <p class="small muted">
+                    I can see the whole query warehouse &mdash; devices, blocklists, and what
+                    kind of content each domain hosts &mdash; so you can ask by category
+                    rather than only by domain name. Try one of these:
+                </p>
+                <div class="chat-suggestions">
+                    @foreach (var ex in PiholeReportServer.Pages.AnalystModel.Examples)
+                    {
+                        <button type="button" class="chip" data-chat-suggestion>@ex</button>
+                    }
+                </div>
+            </div>
+        }
+        else
+        {
+            @foreach (var turn in Model.Conversation.Turns)
             {
-                <li>@ex</li>
+                <partial name="Shared/_ChatTurn" model="turn" />
             }
-        </ul>
-        <p class="small muted" style="margin-bottom:0">
-            The model knows the warehouse schema, including the domain categories, so it
-            can answer by content type rather than only by domain name.
-        </p>
-    </div>
-}
-else
-{
-    var run = Model.Run;
-
-    <div class="result-meta" style="margin-top:1.5rem">
-        <span><strong>@run.SuccessfulQueries</strong> quer@(run.SuccessfulQueries == 1 ? "y" : "ies") run</span>
-        <span>@run.Elapsed.TotalSeconds.ToString("N0")s</span>
-        <span class="mono">@run.Model</span>
-        @switch (run.Outcome)
-        {
-            case AgentOutcome.Answered:
-                <span class="badge badge-pine">Answered</span>
-                break;
-            case AgentOutcome.StepLimit:
-                <span class="badge badge-gold">Ran out of queries</span>
-                break;
-            case AgentOutcome.Timeout:
-                <span class="badge badge-gold">Ran out of time</span>
-                break;
-            default:
-                <span class="badge badge-gold">Failed</span>
-                break;
         }
     </div>
 
-    @if (run.HasAnswer)
-    {
-        <div class="card ai-panel">
-            <div class="ai-head">
-                <span class="icon-tile ai-icon" aria-hidden="true">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                         stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 3v3" /><path d="M12 18v3" /><path d="M3 12h3" /><path d="M18 12h3" />
-                        <circle cx="12" cy="12" r="4" />
-                    </svg>
-                </span>
-                <div>
-                    <h3 style="margin:0">Conclusion</h3>
-                    <p class="small muted" style="margin:0">Check it against the queries below.</p>
-                </div>
-            </div>
-            <div class="ai-answer">
-                <div class="ai-prose">@run.Answer</div>
-            </div>
-        </div>
-    }
+    <form class="chat-composer" method="post" data-chat-form
+          asp-page-handler="Ask" asp-route-c="@Model.ConversationId">
+        <input type="hidden" name="ConversationId" value="@Model.ConversationId" data-chat-id />
+        <label class="visually-hidden" asp-for="Question">Your question</label>
+        <textarea asp-for="Question" data-chat-input rows="1" maxlength="500"
+                  placeholder="Ask about your DNS traffic&hellip;"
+                  autocomplete="off" enterkeyhint="send"
+                  disabled="@(!Model.Enabled)"></textarea>
+        <button type="submit" class="btn btn-primary" data-chat-send disabled="@(!Model.Enabled)">
+            <span data-chat-send-label>Ask</span>
+        </button>
+    </form>
 
-    @if (run.Error is not null)
-    {
-        <div class="notice notice-error">
-            <strong>The investigation did not complete.</strong> @run.Error
-        </div>
-    }
-
-    @if (run.Steps.Count > 0)
-    {
-        <div class="category-head">
-            <h2>What it did</h2>
-            <span class="rule"></span>
-            <span class="small muted">@run.Steps.Count step@(run.Steps.Count == 1 ? "" : "s")</span>
-        </div>
-
-        @foreach (var step in run.Steps)
+    <div class="chat-foot small muted">
+        <span>
+            Runs on your own hardware, on <span class="mono">@Model.Model</span>. Up to
+            @Model.MaxSteps queries and @Model.BudgetSeconds seconds per question.
+        </span>
+        @if (Model.Conversation is not null && Model.Conversation.Turns.Count > 0)
         {
-            <div class="card agent-step">
-                <div class="row">
-                    <span class="step-number">@step.Number</span>
-                    @switch (step.Kind)
-                    {
-                        case AgentStepKind.Query:
-                            <span class="badge badge-pine">
-                                @step.RowCount.ToString("N0") row@(step.RowCount == 1 ? "" : "s")
-                            </span>
-                            break;
-                        case AgentStepKind.Refused:
-                            <span class="badge badge-gold">Refused by the guard</span>
-                            break;
-                        default:
-                            <span class="badge badge-gold">Query failed</span>
-                            break;
-                    }
-                    @if (step.Truncated)
-                    {
-                        <span class="badge badge-gold">Capped</span>
-                    }
-                    <span class="spacer"></span>
-                    @if (step.Elapsed > TimeSpan.Zero)
-                    {
-                        <span class="small muted">@step.Elapsed.TotalMilliseconds.ToString("N0") ms</span>
-                    }
-                </div>
-
-                @if (!string.IsNullOrWhiteSpace(step.Reasoning))
-                {
-                    <p class="small muted" style="margin:.6rem 0 0">@step.Reasoning</p>
-                }
-
-                <pre class="ai-sql">@step.Sql</pre>
-
-                @if (step.Problem is not null)
-                {
-                    <div class="notice notice-warn" style="margin-bottom:0">@step.Problem</div>
-                }
-
-                @if (step.Result is not null && step.Result.Rows.Count > 0)
-                {
-                    <details>
-                        <summary class="small muted" style="cursor:pointer">
-                            Show the rows the model saw
-                        </summary>
-                        <div style="margin-top:.75rem">
-                            <partial name="Shared/_ResultTable" model="ResultTableViewModel.Inline(step.Result)" />
-                        </div>
-                    </details>
-                }
-            </div>
+            <form method="post" asp-page-handler="Clear" asp-route-c="@Model.ConversationId">
+                <button type="submit" class="btn-link">Start a new conversation</button>
+            </form>
         }
-    }
+    </div>
+</div>
+
+@section Scripts {
+    @* result-table.js is already loaded by the layout for every page. *@
+    <script src="~/js/analyst-chat.js" asp-append-version="true" defer></script>
 }

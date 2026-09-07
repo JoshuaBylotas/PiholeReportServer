@@ -79,4 +79,51 @@ public sealed class AgentRun
     public int SuccessfulQueries => Steps.Count(s => s.Kind == AgentStepKind.Query);
 
     public bool HasAnswer => !string.IsNullOrWhiteSpace(Answer);
+
+    /// <summary>
+    /// The model's raw JSON replies, kept so the next turn of a conversation can
+    /// replay them. Not shown to the user.
+    /// </summary>
+    public List<string> ModelReplies { get; } = [];
+
+    /// <summary>The digests the model was shown, replayed alongside the above.</summary>
+    public List<string> Observations { get; } = [];
+
+    /// <summary>
+    /// Set when the turn was the user teaching it something ("the Pixel is Jason's
+    /// phone") rather than asking a question. The page persists it.
+    /// </summary>
+    public AgentMemoryRequest? MemoryRequest { get; set; }
+
+    /// <summary>
+    /// The rows to show under the answer: the last query that actually returned any.
+    /// <para>
+    /// This is the point of the page for anything phrased as "show me" or "list" —
+    /// the prose is an introduction to this table, not a replacement for it. The last
+    /// productive query is the right one because the agent narrows as it goes, so its
+    /// final query is the one that addressed the question.
+    /// </para>
+    /// </summary>
+    public QueryResult? AnswerTable =>
+        Steps.LastOrDefault(s => s.Kind == AgentStepKind.Query && s.Result is { Rows.Count: > 0 })?.Result;
+}
+
+/// <summary>
+/// A request from the model to remember or forget a standing fact, raised when the
+/// user is telling it something rather than asking. The agent does not write it
+/// itself: persistence is scoped to the signed-in identity, which the page owns.
+/// </summary>
+public sealed class AgentMemoryRequest
+{
+    public bool Forget { get; init; }
+
+    /// <summary>"device" for an alias that becomes a filter, "note" otherwise.</summary>
+    public string Kind { get; init; } = "note";
+
+    public string? Subject { get; init; }
+
+    /// <summary>Hostname, IP or MAC the subject refers to. Required for a device.</summary>
+    public string? Target { get; init; }
+
+    public string? Fact { get; init; }
 }
