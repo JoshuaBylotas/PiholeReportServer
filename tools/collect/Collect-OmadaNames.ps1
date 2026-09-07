@@ -48,7 +48,11 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string]$Controller     = 'https://10.20.0.3:8043',
-    [string]$CredentialPath = (Join-Path $PSScriptRoot '..\..\private\omada.json'),
+    # Resolved in the body, not here: $PSScriptRoot is EMPTY while parameter
+    # defaults are evaluated under Windows PowerShell 5.1 with -File, which is how
+    # the scheduled task invokes this. Join-Path then fails on an empty Path and
+    # the script dies before it can log anything.
+    [string]$CredentialPath,
     [string]$SqlServer      = 'WINSERVER01',
     [string]$Database       = 'pihole',
     [switch]$IncludeOffline
@@ -56,16 +60,135 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# A scheduled task's console output goes nowhere, so a failure at 00:30 is
+# invisible. Transcript to a dated file beside the script, keeping a fortnight.
+$script:LogDir = Join-Path $PSScriptRoot 'logs'
+try {
+    if (-not (Test-Path $script:LogDir)) { New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null }
+    Start-Transcript -Path (Join-Path $script:LogDir ("{0}-{1}.log" -f
+        [IO.Path]::GetFileNameWithoutExtension($PSCommandPath), (Get-Date -Format 'yyyyMMdd-HHmmss'))) | Out-Null
+    Get-ChildItem $script:LogDir -Filter '*.log' -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-14) } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+} catch {
+    # Logging is a convenience. Never let it stop the collection.
+}
+
+# Report a real exit code: Task Scheduler shows LastTaskResult, and a script that
+# throws but exits 0 looks like a success in the history.
+trap {
+    Write-Host "  FAIL $($_.Exception.Message)" -ForegroundColor Red
+    try { Stop-Transcript | Out-Null } catch { }
+    exit 1
+}
+
 function Step($m) { Write-Host "`n=== $m ===" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "  OK   $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  WARN $m" -ForegroundColor Yellow }
 
-# The controller uses a self-signed certificate by default. This is a LAN call to
-# a host named in the parameter, not a trust decision about the internet.
-$PSDefaultParameterValues['Invoke-RestMethod:SkipCertificateCheck'] = $true
+# ── HTTP, the long way round ────────────────────────────────────────────────
+#
+# Invoke-RestMethod cannot do this on Windows PowerShell 5.1, which is what ships
+# on the domain controller where this is scheduled:
+#
+#   -SkipCertificateCheck   PowerShell 6+ only, and the controller has a
+#                           self-signed certificate
+#   -SkipHeaderValidation   PowerShell 6+ only, and Omada sends the token as
+#                           "AccessToken=<value>", which is not the "scheme value"
+#                           shape the Authorization header is validated against -
+#                           5.1 refuses to send it at all
+#
+# HttpClient does both on 5.1 and 7 alike, so there is one code path rather than a
+# version check that only gets exercised on one of them.
+Add-Type -AssemblyName System.Net.Http
+
+# The certificate callback must be a COMPILED delegate, not a PowerShell script
+# block. .NET invokes it on a background thread during the TLS handshake, where
+# there is no PowerShell runspace, so a script block throws
+# "There is no Runspace available to run scripts in this thread" and the whole
+# connection fails with the far less helpful "An error occurred while sending the
+# request."
+#
+# A LAN call to the host named in -Controller, not a trust decision about the
+# internet: the controller ships a self-signed certificate and there is nothing to
+# validate it against.
+if (-not ('OmadaTls' -as [type])) {
+    Add-Type -ReferencedAssemblies System.Net.Http -TypeDefinition @'
+using System;
+using System.Net;
+using System.Net.Http;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+
+public static class OmadaTls
+{
+    // Used by HttpClientHandler on .NET Core / PowerShell 7.
+    public static readonly Func<HttpRequestMessage, X509Certificate2, X509Chain, SslPolicyErrors, bool>
+        Callback = (m, c, ch, e) => true;
+
+    // .NET Framework routes HttpClient through ServicePointManager, so 5.1 needs
+    // this one as well.
+    public static void Enable()
+    {
+        ServicePointManager.ServerCertificateValidationCallback =
+            (s, c, ch, e) => true;
+        ServicePointManager.SecurityProtocol =
+            SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+    }
+}
+'@
+}
+[OmadaTls]::Enable()
+
+$script:HttpHandler = New-Object System.Net.Http.HttpClientHandler
+try {
+    $script:HttpHandler.ServerCertificateCustomValidationCallback = [OmadaTls]::Callback
+} catch {
+    # Not present on every framework version; ServicePointManager above covers it.
+}
+$script:Http = New-Object System.Net.Http.HttpClient($script:HttpHandler)
+$script:Http.Timeout = [TimeSpan]::FromSeconds(120)
+
+function Invoke-OmadaJson {
+    param(
+        [Parameter(Mandatory)][string]$Uri,
+        [ValidateSet('GET', 'POST')][string]$Method = 'GET',
+        [string]$Body,
+        [string]$AccessToken
+    )
+
+    $req = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::$Method, $Uri)
+    if ($AccessToken) {
+        # TryAddWithoutValidation is the whole point: the header value is not in
+        # "scheme value" form and .NET would otherwise refuse it too.
+        [void]$req.Headers.TryAddWithoutValidation('Authorization', "AccessToken=$AccessToken")
+    }
+    if ($Body) {
+        $req.Content = New-Object System.Net.Http.StringContent($Body, [Text.Encoding]::UTF8, 'application/json')
+    }
+
+    $resp = $script:Http.SendAsync($req).GetAwaiter().GetResult()
+    $text = $resp.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    if (-not $resp.IsSuccessStatusCode) {
+        throw "HTTP $([int]$resp.StatusCode) from $Uri : $($text.Substring(0, [Math]::Min(300, $text.Length)))"
+    }
+    $req.Dispose(); $resp.Dispose()
+    $text | ConvertFrom-Json
+}
 
 # ── Credentials ─────────────────────────────────────────────────────────────
 Step 'Credentials'
+
+if (-not $CredentialPath) {
+    # Two layouts: beside the script once installed by Register-Collectors.ps1, or
+    # under private/ when run from a clone of the repository.
+    $candidates = @(
+        (Join-Path $PSScriptRoot 'omada.json'),
+        (Join-Path $PSScriptRoot '..\..\private\omada.json')
+    )
+    $CredentialPath = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $CredentialPath) { $CredentialPath = $candidates[0] }
+}
 
 if (-not (Test-Path $CredentialPath)) {
     throw @"
@@ -99,8 +222,7 @@ $tokenBody = @{
     client_secret = $cred.clientSecret
 } | ConvertTo-Json
 
-$tok = Invoke-RestMethod -Uri $tokenUri -Method Post -Body $tokenBody `
-         -ContentType 'application/json' -TimeoutSec 30
+$tok = Invoke-OmadaJson -Uri $tokenUri -Method POST -Body $tokenBody
 
 if ($tok.errorCode -ne 0) {
     throw "Token request failed: errorCode=$($tok.errorCode) $($tok.msg)"
@@ -109,19 +231,12 @@ $token = $tok.result.accessToken
 if (-not $token) { throw 'The controller returned no access token.' }
 Ok "token acquired, expires in $($tok.result.expiresIn)s"
 
-$headers = @{ Authorization = "AccessToken=$token" }
 
-# Omada sends the token as "AccessToken=<value>", which is not the "scheme value"
-# shape PowerShell validates the Authorization header against - it refuses to send
-# it at all with "The format of value ... is invalid". -SkipHeaderValidation on
-# every call below turns that check off; the header itself is exactly what the
-# controller documents.
-$PSDefaultParameterValues['Invoke-RestMethod:SkipHeaderValidation'] = $true
 
 # ── Sites ───────────────────────────────────────────────────────────────────
 Step 'Sites'
 
-$sites = Invoke-RestMethod -Headers $headers -TimeoutSec 30 `
+$sites = Invoke-OmadaJson -AccessToken $token `
            -Uri "$Controller/openapi/v1/$($cred.omadacId)/sites?pageSize=100&page=1"
 if ($sites.errorCode -ne 0) { throw "Site list failed: $($sites.errorCode) $($sites.msg)" }
 
@@ -141,7 +256,7 @@ foreach ($site in $siteList) {
     while ($true) {
         $uri = "$Controller/openapi/v1/$($cred.omadacId)/sites/$($site.siteId)/clients" +
                "?page=$page&pageSize=100"
-        $resp = Invoke-RestMethod -Headers $headers -Uri $uri -TimeoutSec 60
+        $resp = Invoke-OmadaJson -AccessToken $token -Uri $uri
         if ($resp.errorCode -ne 0) { throw "Client list failed: $($resp.errorCode) $($resp.msg)" }
 
         $batch = @($resp.result.data)
@@ -285,3 +400,6 @@ while ($r.Read()) {
 }
 $r.Close()
 $conn.Close()
+
+try { Stop-Transcript | Out-Null } catch { }
+exit 0

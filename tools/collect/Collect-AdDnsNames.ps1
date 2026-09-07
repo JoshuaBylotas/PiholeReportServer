@@ -56,6 +56,28 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# A scheduled task's console output goes nowhere, so a failure at 00:30 is
+# invisible. Transcript to a dated file beside the script, keeping a fortnight.
+$script:LogDir = Join-Path $PSScriptRoot 'logs'
+try {
+    if (-not (Test-Path $script:LogDir)) { New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null }
+    Start-Transcript -Path (Join-Path $script:LogDir ("{0}-{1}.log" -f
+        [IO.Path]::GetFileNameWithoutExtension($PSCommandPath), (Get-Date -Format 'yyyyMMdd-HHmmss'))) | Out-Null
+    Get-ChildItem $script:LogDir -Filter '*.log' -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-14) } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+} catch {
+    # Logging is a convenience. Never let it stop the collection.
+}
+
+# Report a real exit code: Task Scheduler shows LastTaskResult, and a script that
+# throws but exits 0 looks like a success in the history.
+trap {
+    Write-Host "  FAIL $($_.Exception.Message)" -ForegroundColor Red
+    try { Stop-Transcript | Out-Null } catch { }
+    exit 1
+}
+
 function Step($m) { Write-Host "`n=== $m ===" -ForegroundColor Cyan }
 function Ok($m)   { Write-Host "  OK   $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "  WARN $m" -ForegroundColor Yellow }
@@ -65,7 +87,7 @@ $MacShaped = '^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$'
 
 Step "Reading $Zone from $DnsServer"
 
-$records = Invoke-Command -ComputerName $DnsServer -ArgumentList $Zone -ScriptBlock {
+$readZone = {
     param($z)
     Get-DnsServerResourceRecord -ZoneName $z -RRType A | ForEach-Object {
         [pscustomobject]@{
@@ -74,6 +96,17 @@ $records = Invoke-Command -ComputerName $DnsServer -ArgumentList $Zone -ScriptBl
             Timestamp = $_.Timestamp          # null for a static record
         }
     }
+}
+
+# Run in-process when this IS the DNS server. The scheduled task runs on the DC as
+# SYSTEM, and a WinRM loopback from SYSTEM would need rights it does not have and
+# does not need - the DNS role is right here.
+$isLocal = $DnsServer -in @('.', 'localhost', $env:COMPUTERNAME, "$env:COMPUTERNAME.$env:USERDNSDOMAIN")
+$records = if ($isLocal) {
+    Ok 'reading the zone locally'
+    & $readZone $Zone
+} else {
+    Invoke-Command -ComputerName $DnsServer -ArgumentList $Zone -ScriptBlock $readZone
 }
 Ok "$($records.Count) A records"
 
@@ -209,3 +242,6 @@ Write-Host @"
   the better source - it is the DHCP server and it holds the names you assigned -
   so run Collect-OmadaNames.ps1 as well once its API credentials are configured.
 "@ -ForegroundColor Cyan
+
+try { Stop-Transcript | Out-Null } catch { }
+exit 0
