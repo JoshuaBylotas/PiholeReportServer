@@ -195,6 +195,64 @@ a Pi-hole owner those raise one shared concern: traffic that avoids the filter.
 **After every corpus refresh**, re-run `tools/schema/CategoryMap.sql`. Its final
 two queries list any unmapped value and show which concepts were split.
 
+### Device names: read `dbo.vClient`, not `dbo.DimClient`
+
+`DimClient.name` is FTL's reverse DNS, which on this network gave 34 different
+devices the name `ALIEN01`. Names are now collected from sources that actually
+know, keyed on **MAC** — the only identifier that survives a DHCP change — into
+`dbo.DeviceNameObservation`, and resolved by `dbo.vDeviceName`.
+
+Precedence, and why:
+
+| Rank | Source | What it is |
+|------|--------|------------|
+| 1 | `manual` | Stated by hand in the table. Nothing outranks a deliberate statement. |
+| 2 | `omada` | A name **typed into the controller** by a person. |
+| 3 | `addns` | An A record in the AD forward zone. |
+| 4 | `omadadhcp` | A hostname the **device announced itself** at DHCP. |
+| 5 | `ftl` | Pi-hole reverse DNS. Last, being the source of the original mess. |
+
+The two Omada ranks are the important part. The controller reports a typed name
+and a device-announced hostname in the same object, and ranking them together was
+a real bug: two devices resolved to **`wlan0`**, the Fire TV's own interface name,
+beating AD DNS's `firestick-0a0a273294170242`. A self-announced hostname now sits
+*below* DNS, which is the honest ordering — both are self-reported, but the DNS one
+at least survived registration. Of 65 names the controller returned, only 9 were
+actually typed.
+
+Names that identify a network stack rather than a device (`wlan0`, `eth0`,
+`localhost`, `android-a1b2c3`, a bare MAC) are excluded at every rank, so they fall
+through to a source that has something better rather than winning by position.
+
+`dbo.vClient` is `DimClient` with `display_name` attached — never null, falling back
+through the resolved name, FTL's, then the raw address — plus `name_source` so a
+surprising name can be traced. **The builder, the client picker, the SQL console and
+the model's schema all read this view.**
+
+Collection is by polling, not webhook:
+
+```powershell
+tools\collect\Collect-AdDnsNames.ps1     # AD DNS -> addns
+tools\collect\Collect-OmadaNames.ps1     # controller -> omada / omadadhcp
+```
+
+Both replace their own source wholesale, so a device deleted upstream stops being
+asserted rather than winning forever on a stale row. Both support `-WhatIf`.
+
+`Collect-AdDnsNames.ps1` **skips an address claimed by more than one real name**
+rather than choosing between them — lease reuse leaves `10.20.1.2` claimed by four
+names at once. Being unnamed is recoverable; being confidently wrong is what
+produced `ALIEN01`.
+
+To override anything permanently, insert a `manual` observation:
+
+```sql
+INSERT INTO dbo.DeviceNameObservation (mac, source, name)
+VALUES ('e0:d3:62:94:9b:90', 'manual', 'Games PC');
+```
+
+`dbo.vDeviceName.distinct_names > 1` lists devices whose sources disagree.
+
 ### Two traps in `DimClient`
 
 **The grain is the IP, not the device.** A phone with an IPv4 lease and several

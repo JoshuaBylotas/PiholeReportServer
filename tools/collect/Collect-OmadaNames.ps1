@@ -111,6 +111,13 @@ Ok "token acquired, expires in $($tok.result.expiresIn)s"
 
 $headers = @{ Authorization = "AccessToken=$token" }
 
+# Omada sends the token as "AccessToken=<value>", which is not the "scheme value"
+# shape PowerShell validates the Authorization header against - it refuses to send
+# it at all with "The format of value ... is invalid". -SkipHeaderValidation on
+# every call below turns that check off; the header itself is exactly what the
+# controller documents.
+$PSDefaultParameterValues['Invoke-RestMethod:SkipHeaderValidation'] = $true
+
 # ── Sites ───────────────────────────────────────────────────────────────────
 Step 'Sites'
 
@@ -165,36 +172,49 @@ foreach ($c in $clients) {
     $mac = ($c.mac -replace '-', ':').ToLowerInvariant()
     if ($mac -notmatch '^[0-9a-f]{2}(:[0-9a-f]{2}){5}$') { continue }
 
-    # "name" is what someone typed in the controller; "hostName" is what the device
-    # asked for at DHCP. The typed one wins - that is the whole reason to prefer
-    # this source.
-    $name = $null
-    foreach ($candidate in @($c.name, $c.hostName)) {
-        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
-        $t = $candidate.Trim()
-        if ($t -match $macShaped) { continue }
-        if ($t -eq $c.ip) { continue }
-        $name = $t
-        break
-    }
-    if (-not $name) { $noName++; continue }
-
     if (-not $IncludeOffline -and $c.PSObject.Properties['active'] -and -not $c.active) {
         continue
     }
 
+    # Two different things live here, and conflating them was a real bug: the first
+    # run resolved two devices to "wlan0" because a device-announced hostname was
+    # ranked above AD DNS, beating "firestick-0a0a273294170242".
+    #
+    #   name      typed into the controller by a person - authoritative
+    #   hostName  announced by the device at DHCP - sometimes excellent, sometimes
+    #             "wlan0" or "localhost"
+    #
+    # The controller falls back to the hostname when nothing has been typed, so a
+    # name equal to hostName is not evidence anyone chose it.
+    $typed    = if ([string]::IsNullOrWhiteSpace($c.name)) { $null } else { $c.name.Trim() }
+    $announced = if ([string]::IsNullOrWhiteSpace($c.hostName)) { $null } else { $c.hostName.Trim() }
+
+    if ($typed -and $announced -and $typed -eq $announced) { $typed = $null }
+
+    $name = $null; $src = $null
+    if ($typed   -and $typed   -notmatch $macShaped -and $typed   -ne $c.ip) { $name = $typed;   $src = 'omada' }
+    elseif ($announced -and $announced -notmatch $macShaped -and $announced -ne $c.ip) { $name = $announced; $src = 'omadadhcp' }
+
+    if (-not $name) { $noName++; continue }
+
+    # Reverse DNS suffixes the domain; the controller sometimes carries it too.
+    # Strip it so one device does not appear under two spellings.
+    $name = $name -replace '\.bylotas\.(net|com)$', ''
+
     $rows[$mac] = [pscustomobject]@{
-        Mac  = $mac
-        Name = $name
-        Ip   = $c.ip
-        Type = $c.deviceType
+        Mac    = $mac
+        Name   = $name
+        Ip     = $c.ip
+        Type   = $c.deviceType
+        Source = $src
     }
 }
-Ok "$($rows.Count) named device(s); $noName had only a MAC-shaped or empty name"
+$typedCount = @($rows.Values | Where-Object { $_.Source -eq 'omada' }).Count
+Ok "$($rows.Count) named device(s): $typedCount named in the controller, $($rows.Count - $typedCount) self-announced; $noName unusable"
 
 if ($WhatIfPreference) {
-    $rows.Values | Sort-Object Name | Select-Object -First 40 |
-        ForEach-Object { "  {0,-20} {1,-16} {2}" -f $_.Mac, $_.Ip, $_.Name }
+    $rows.Values | Sort-Object Source, Name | Select-Object -First 40 |
+        ForEach-Object { "  {0,-11} {1,-20} {2,-16} {3}" -f $_.Source, $_.Mac, $_.Ip, $_.Name }
     Warn "-WhatIf: $($rows.Count) row(s) not written"
     return
 }
@@ -213,21 +233,23 @@ if ($PSCmdlet.ShouldProcess("$SqlServer/$Database", "replace $($rows.Count) omad
         # asserted by it, not keep winning forever on a stale row.
         $del = $conn.CreateCommand()
         $del.Transaction = $tx
-        $del.CommandText = "DELETE FROM dbo.DeviceNameObservation WHERE source = 'omada'"
+        $del.CommandText = "DELETE FROM dbo.DeviceNameObservation WHERE source IN ('omada', 'omadadhcp')"
         $removed = $del.ExecuteNonQuery()
 
         $ins = $conn.CreateCommand()
         $ins.Transaction = $tx
         $ins.CommandText = @'
 INSERT INTO dbo.DeviceNameObservation (mac, source, name, ip, device_type, observed_utc)
-VALUES (@mac, 'omada', @name, @ip, @type, SYSUTCDATETIME());
+VALUES (@mac, @source, @name, @ip, @type, SYSUTCDATETIME());
 '@
+        [void]$ins.Parameters.Add('@source', [Data.SqlDbType]::VarChar, 10)
         [void]$ins.Parameters.Add('@mac',  [Data.SqlDbType]::VarChar, 17)
         [void]$ins.Parameters.Add('@name', [Data.SqlDbType]::NVarChar, 255)
         [void]$ins.Parameters.Add('@ip',   [Data.SqlDbType]::VarChar, 45)
         [void]$ins.Parameters.Add('@type', [Data.SqlDbType]::NVarChar, 60)
 
         foreach ($row in $rows.Values) {
+            $ins.Parameters['@source'].Value = $row.Source
             $ins.Parameters['@mac'].Value  = $row.Mac
             $ins.Parameters['@name'].Value = $row.Name
             $ins.Parameters['@ip'].Value   = if ($row.Ip)   { $row.Ip }   else { [DBNull]::Value }
@@ -249,16 +271,17 @@ $check = $conn.CreateCommand()
 $check.CommandTimeout = 300
 $check.CommandText = @'
 SELECT devices   = COUNT(*),
-       omada     = SUM(CASE WHEN name_source = 'omada' THEN 1 ELSE 0 END),
-       addns     = SUM(CASE WHEN name_source = 'addns' THEN 1 ELSE 0 END),
+       omada     = SUM(CASE WHEN name_source = 'omada'     THEN 1 ELSE 0 END),
+       addns     = SUM(CASE WHEN name_source = 'addns'     THEN 1 ELSE 0 END),
+       announced = SUM(CASE WHEN name_source = 'omadadhcp' THEN 1 ELSE 0 END),
        still_ftl = SUM(CASE WHEN name_source = 'ftl'   THEN 1 ELSE 0 END),
        unnamed   = SUM(CASE WHEN name_source = 'ip'    THEN 1 ELSE 0 END)
 FROM dbo.vClient WHERE mac IS NOT NULL;
 '@
 $r = $check.ExecuteReader()
 while ($r.Read()) {
-    "  {0} device(s): {1} from Omada, {2} from AD DNS, {3} still FTL, {4} unnamed" -f `
-        $r['devices'], $r['omada'], $r['addns'], $r['still_ftl'], $r['unnamed']
+    "  {0} device(s): {1} named in Omada, {2} from AD DNS, {3} self-announced, {4} still FTL, {5} unnamed" -f `
+        $r['devices'], $r['omada'], $r['addns'], $r['announced'], $r['still_ftl'], $r['unnamed']
 }
 $r.Close()
 $conn.Close()
