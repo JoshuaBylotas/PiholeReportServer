@@ -286,6 +286,44 @@ What it builds, from Pi-hole's own `network`, `network_addresses` and `gravity.d
 
 ---
 
+## Untrustworthy device names
+
+`dbo.DimClient.name` comes from `network_addresses.name` in FTL's database, which FTL
+populates from its own **reverse DNS lookups**. Where the DNS server holds stale PTR
+records — a laptop that roamed across many DHCP leases, for instance — one name comes
+back for many unrelated addresses.
+
+Observed on this network: `ALIEN01.bylotas.net` was recorded against **37 IPs spanning
+34 distinct devices**, with Samsung, Nintendo, AzureWave and Espressif MACs among them.
+`dims.py` copied that faithfully, so every report grouping by device name aggregated
+most of the household under one label — and the figures were wrong by a wide margin.
+
+`dims.py` now refuses to trust a name that belongs to more than one device:
+
+```sql
+SELECT name FROM network_addresses
+WHERE name IS NOT NULL AND name != ''
+GROUP BY name HAVING COUNT(DISTINCT network_id) > 1
+```
+
+Anything in that set is replaced with a vendor-plus-MAC label — `Espressif Inc. aef354`
+— which actually identifies the device. Two columns record what happened:
+
+| Column | Meaning |
+|--------|---------|
+| `name` | Safe to group by. Either a trusted reverse-DNS name or a MAC-derived label |
+| `reported_name` | What FTL claimed, kept for diagnosis |
+| `name_ambiguous` | 1 when the reported name was rejected |
+
+After the fix: **0 names span different devices**, down from 30. The 28 names still
+covering several IPs are genuine multi-homed hosts — same MAC, two addresses — which is
+correct.
+
+> **This is a workaround, not the cure.** The stale PTR records are still in DNS. The
+> real fix is upstream: scavenge them on the DNS server, or stop dynamic registration
+> from creating PTRs for short-lived DHCP leases. Until then `name_ambiguous = 1` marks
+> every row the DNS lied about — currently 109 of 220.
+
 ## Operating notes
 
 ```bash
