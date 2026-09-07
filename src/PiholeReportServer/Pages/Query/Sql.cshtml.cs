@@ -78,7 +78,7 @@ public sealed class SqlModel : PageModel
                COUNT_BIG(*)                    AS queries,
                COUNT(DISTINCT q.domain)        AS distinct_domains
         FROM dbo.PiholeQueries AS q
-             LEFT JOIN dbo.DimClient AS dc ON dc.ip = q.client
+             LEFT JOIN dbo.vClient AS dc ON dc.ip = q.client
         WHERE q.ts >= DATEADD(hour, -24, SYSUTCDATETIME())
         GROUP BY COALESCE(dc.name, q.client)
         ORDER BY queries DESC

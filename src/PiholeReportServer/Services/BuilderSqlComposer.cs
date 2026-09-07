@@ -27,7 +27,10 @@ public static class BuilderSqlComposer
     {
         [GroupDimension.Domain]         = new("q.domain", "domain"),
         [GroupDimension.Client]         = new("q.client", "client"),
-        [GroupDimension.ClientHostname] = new("COALESCE(dc.name, q.client)", "client_name"),
+        // display_name, not dc.name: the view resolves the name from the Omada
+        // controller and AD DNS before falling back to FTL's reverse DNS, which is
+        // what gave 34 different devices the name ALIEN01.
+        [GroupDimension.ClientHostname] = new("dc.display_name", "client_name"),
         [GroupDimension.QueryType]      = new("COALESCE(dt.type_text, CONCAT('type ', q.type))", "query_type"),
         [GroupDimension.Status]         = new("COALESCE(ds.status_text, q.status_text)", "status"),
         [GroupDimension.Upstream]       = new("COALESCE(q.forward, '(cache or blocked)')", "upstream"),
@@ -88,7 +91,7 @@ public static class BuilderSqlComposer
 
         if (needsClientDim)
         {
-            sb.AppendLine("     LEFT JOIN dbo.DimClient AS dc ON dc.ip = q.client");
+            sb.AppendLine("     LEFT JOIN dbo.vClient AS dc ON dc.ip = q.client");
         }
         if (needsTypeDim)
         {

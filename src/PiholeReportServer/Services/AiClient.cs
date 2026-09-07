@@ -77,17 +77,19 @@ public sealed class AiClient
         dbo.PiholeQueries(id bigint, ts datetime2 UTC, type int, status int, status_text varchar,
           domain varchar(255), client varchar(255) = IP, forward varchar(255), reply_type int,
           reply_time float SECONDS, dnssec int, ede int)
-        dbo.DimClient(ip, name, mac, mac_vendor, interface, num_queries, last_query,
-          reported_name, name_ambiguous bit)
-          -- ONE ROW PER IP, so a device with IPv4 + several IPv6 addresses has
-          -- several rows. Device name column is "name"; vendor is "mac_vendor";
-          -- join dc.ip = q.client.
+        dbo.vClient(ip, mac, mac_vendor, interface, num_queries, last_query,
+          display_name, name_source, ftl_name, name_ambiguous bit)
+          -- Devices. USE THIS, never dbo.DimClient: display_name resolves the name
+          -- from the Omada controller (the DHCP server, and where devices are named
+          -- by hand) and then AD DNS, before falling back to FTL's reverse DNS,
+          -- which gave 34 different devices the name "ALIEN01". display_name is
+          -- never null. name_source says which source won.
+          -- ONE ROW PER IP, so a device with IPv4 plus several IPv6 addresses has
+          -- several rows. Join dc.ip = q.client.
           -- num_queries is a LIFETIME PER-DEVICE total that FTL copies onto every
           -- one of that device's IP rows. NEVER SUM it - that multiplies by the
           -- number of addresses (52 devices here, one inflated 6x). Use
           -- MAX(num_queries) GROUP BY mac, and prefer counting PiholeQueries.
-          -- name_ambiguous=1 means reverse DNS returned this name for several
-          -- distinct devices, so the name is not trustworthy: group by mac.
         dbo.DimType(type, type_text)
         dbo.DimStatus(status, status_text)
         dbo.GravityDomains(domain, adlist_id) -- one row per (domain, adlist) pair
@@ -132,7 +134,8 @@ public sealed class AiClient
         - Prefer COUNT_BIG(*) over COUNT(*) on this table.
         - Count activity from PiholeQueries. DimClient.num_queries is a lifetime
           per-device figure duplicated across IP rows and is not comparable to it.
-        - Per-device totals: GROUP BY dc.mac, not dc.ip and not dc.name.
+        - Per-device totals: GROUP BY dc.mac, not dc.ip. To show a device by name,
+          group on dc.display_name.
         - For "what kind of traffic is this", join dbo.vDomainCategory rather than
           guessing from the domain name, and group on canonical_category.
 
@@ -148,7 +151,7 @@ public sealed class AiClient
         MATCHING NAMES AND DOMAINS
         - Device names are full hostnames like 'Pixel-9-Pro-XL' or 'WINSERVER01'. A
           person naming a device will not type it exactly, so match with
-          dc.name LIKE '%pixel%', never dc.name = 'Pixel'.
+          dc.display_name LIKE '%pixel%', never dc.display_name = 'Pixel'.
         - To find a service by name, filter the QUERY domain:
           q.domain LIKE '%youtube%'. Do not put a domain pattern inside an EXISTS
           against the category view - that is for category lookups, and a LIKE on

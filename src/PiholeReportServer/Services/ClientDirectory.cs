@@ -22,7 +22,8 @@ public sealed record ClientLookup(IReadOnlyList<ClientEntry> Clients, string? Er
 /// <summary>
 /// The list of known devices, for the builder's client picker.
 /// <para>
-/// Sourced from <c>dbo.DimClient</c>, which the dimension refresh rebuilds daily.
+/// Sourced from <c>dbo.vClient</c>, which resolves each device's name from the
+/// Omada controller and AD DNS before falling back to FTL's reverse DNS.
 /// Deliberately not a <c>SELECT DISTINCT client</c> over the fact table: that is a scan
 /// of tens of millions of rows to produce a couple of hundred values.
 /// </para>
@@ -32,11 +33,14 @@ public sealed class ClientDirectory
     private const string CacheKey = "client-directory";
     private static readonly TimeSpan Ttl = TimeSpan.FromMinutes(10);
 
+    // vClient, not DimClient: display_name resolves through the Omada controller and
+    // AD DNS before FTL's reverse DNS, and is never null, so the ordering below no
+    // longer has to special-case a missing name.
     private const string Sql = """
-        SELECT dc.ip, dc.name, dc.mac_vendor
-        FROM dbo.DimClient AS dc
-        ORDER BY CASE WHEN dc.name IS NULL OR dc.name = '' THEN 1 ELSE 0 END,
-                 dc.name,
+        SELECT dc.ip, dc.display_name AS name, dc.mac_vendor
+        FROM dbo.vClient AS dc
+        ORDER BY CASE WHEN dc.name_source = 'ip' THEN 1 ELSE 0 END,
+                 dc.display_name,
                  dc.ip;
         """;
 
