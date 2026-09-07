@@ -153,11 +153,15 @@ if ($AllowFrom.Count -eq 0) {
     # Ollama has NO authentication of its own. Anyone who can reach this port can
     # use the model and enumerate what is installed.
     Get-NetFirewallRule -DisplayName 'Ollama*' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+
+    # An Allow rule ONLY. Windows Firewall evaluates Block rules BEFORE Allow
+    # rules, so adding a companion "block everything else" rule on the same port
+    # denies the permitted addresses too - it wins over this Allow and closes the
+    # port completely. The default inbound action is already Block, so anything
+    # not matching this rule is refused without help.
     New-NetFirewallRule -DisplayName 'Ollama (report server only)' -Direction Inbound `
         -Protocol TCP -LocalPort 11434 -Action Allow -RemoteAddress $AllowFrom -Profile Any | Out-Null
-    New-NetFirewallRule -DisplayName 'Ollama block others' -Direction Inbound `
-        -Protocol TCP -LocalPort 11434 -Action Block -Profile Any | Out-Null
-    Ok "allowed from $($AllowFrom -join ', ')"
+    Ok "allowed from $($AllowFrom -join ', '); everything else falls to the default deny"
 
     # Rules are inert if the active profile's firewall is off - which is exactly
     # what happened on WINSERVER01 and left the endpoint open without me noticing.
@@ -165,6 +169,14 @@ if ($AllowFrom.Count -eq 0) {
     if ($off) {
         Warn "Windows Firewall is DISABLED for: $($off.Name -join ', '). The rules above will NOT be enforced."
         Warn 'Enable those profiles, or accept that the port is reachable from the LAN.'
+    }
+    # Verify rather than assume. A firewall rule that looks correct and denies
+    # everything anyway is exactly the failure this is guarding against.
+    $probe = Test-NetConnection -ComputerName $env:COMPUTERNAME -Port 11434 -WarningAction SilentlyContinue
+    if (-not $probe.TcpTestSucceeded) {
+        Warn 'Port 11434 is not reachable even locally by name - check the rules before continuing.'
+    } else {
+        Ok 'port 11434 reachable'
     }
 }
 
