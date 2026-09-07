@@ -139,11 +139,34 @@ Dimensions, refreshed on a daily timer by `dims.py`:
 
 | Table | Grain | Join |
 |-------|-------|------|
-| `dbo.DimClient` | one row per known device (`ip`, `name`, `mac`, `mac_vendor`, `interface`, `num_queries`, `last_query`) | `DimClient.ip = PiholeQueries.client` |
+| `dbo.DimClient` | one row per known **IP** (`ip`, `name`, `mac`, `mac_vendor`, `interface`, `num_queries`, `last_query`, `reported_name`, `name_ambiguous`) | `DimClient.ip = PiholeQueries.client` |
 | `dbo.DimType` | one row per record type | `DimType.type = PiholeQueries.type` |
 | `dbo.DimStatus` | one row per status code | `DimStatus.status = PiholeQueries.status` |
 | `dbo.Adlists` | one row per subscribed blocklist | `Adlists.id = GravityDomains.adlist_id` |
 | `dbo.GravityDomains` | domain → blocklist bridge | `GravityDomains.domain = PiholeQueries.domain` |
+
+### Two traps in `DimClient`
+
+**The grain is the IP, not the device.** A phone with an IPv4 lease and several
+IPv6 addresses has several rows. One host here has six. Anything counting
+"devices" by counting rows, or grouping by `ip`, is wrong; group by `mac`.
+
+**`num_queries` must never be summed.** FTL stores it per device and `dims.py`
+copies it onto each of that device's IP rows, so `SUM(num_queries)` multiplies
+the total by the number of addresses. Across this warehouse the sum over rows is
+175,755,074 against a correct per-device total of 76,585,199 — 52 devices are
+affected. Use `MAX(num_queries)` grouped by `mac`.
+
+It is also a **lifetime** counter carried over from FTL and survives the rotation
+of FTL's own database, so it is much larger than anything derived from
+`PiholeQueries` (76.5M against 24.8M rows streamed) and the two are not
+comparable. For query counts, count `PiholeQueries`.
+
+`name_ambiguous = 1` marks a row whose reverse-DNS name was returned for more
+than one device; `reported_name` keeps what FTL originally said. 109 of 220 rows
+are currently flagged, almost all of it one stale PTR record that resolves 37
+addresses across 34 devices to the same name. Reports should group by `mac` or
+exclude flagged rows rather than trust `name`.
 
 ### Status codes worth knowing
 

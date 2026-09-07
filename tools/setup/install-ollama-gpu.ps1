@@ -116,6 +116,30 @@ Ok ($vars.Keys -join ', ')
 # ── 3. Run headless ────────────────────────────────────────────────────────
 Step 'Registering the service'
 
+# A pre-existing server has to go first. Windows allows two listeners on one
+# port when one binds IPv6 wildcard and the other binds IPv4 loopback, so ours
+# would start without error, the model would pull into whichever store the
+# loopback server uses, and remote clients would hit the empty one. That failure
+# is invisible locally - every local test reaches the loopback server and passes.
+$existing = @(Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction SilentlyContinue)
+if ($existing.Count -gt 0) {
+    Warn "port 11434 is already in use by: $(($existing | ForEach-Object { "$($_.LocalAddress) (pid $($_.OwningProcess))" }) -join ', ')"
+    # 'ollama app' is the desktop tray build, and it respawns 'ollama serve'.
+    Get-Process -Name 'ollama app', 'ollama_llama_server', 'ollama' -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            try { Stop-Process -Id $_.Id -Force -ErrorAction Stop; Ok "stopped pre-existing pid $($_.Id) ($($_.ProcessName))" }
+            catch { Warn "could not stop pid $($_.Id): $($_.Exception.Message)" }
+        }
+    foreach ($i in 1..15) {
+        Start-Sleep -Milliseconds 500
+        if (-not (Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction SilentlyContinue)) { break }
+    }
+    if (Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction SilentlyContinue) {
+        throw 'Port 11434 is still held by another process. Reboot, then re-run this script. If the Ollama desktop app is installed, uninstall it or remove it from startup - it will keep taking the port.'
+    }
+    Ok 'port 11434 released'
+}
+
 # A scheduled task, not sc.exe: ollama.exe has no service-control interface, and
 # Task Scheduler gives a priority setting natively.
 $action    = New-ScheduledTaskAction -Execute (Join-Path $InstallDir 'ollama.exe') -Argument 'serve'
@@ -143,6 +167,19 @@ foreach ($i in 1..30) {
 }
 if (-not $up) { throw 'Ollama did not start. Check: Get-ScheduledTaskInfo -TaskName Ollama' }
 Ok 'API responding on 11434'
+
+# "API responding" only proves SOMETHING answered on loopback. What matters is
+# that it is ours and that it is reachable from off-box, which means exactly one
+# listener, on a wildcard address.
+$lsn = @(Get-NetTCPConnection -LocalPort 11434 -State Listen -ErrorAction SilentlyContinue)
+$addrs = ($lsn | ForEach-Object { $_.LocalAddress }) -join ', '
+if ($lsn.Count -gt 1) {
+    throw "Two servers are listening on 11434 ($addrs). Local tests would pass and remote ones would fail. Run repair-ollama-host.ps1."
+}
+if ($lsn.Count -eq 1 -and $lsn[0].LocalAddress -notin '0.0.0.0', '::') {
+    throw "Ollama is listening on $($lsn[0].LocalAddress) only, so no other host can reach it. OLLAMA_HOST did not take effect; reboot and re-run."
+}
+Ok "single listener on the wildcard address ($addrs)"
 
 # ── 4. Firewall ────────────────────────────────────────────────────────────
 Step 'Firewall'
@@ -183,7 +220,16 @@ if ($AllowFrom.Count -eq 0) {
 # ── 5. Model ───────────────────────────────────────────────────────────────
 Step "Pulling $Model"
 & (Join-Path $InstallDir 'ollama.exe') pull $Model
-Ok 'model pulled'
+
+# A pull that prints "success" says nothing about WHICH server stored it, so ask
+# the server we started what it can actually serve. This is the check that would
+# have caught the two-listener fault immediately instead of at the remote client.
+$tags = Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/tags' -TimeoutSec 60
+$names = @($tags.models | ForEach-Object { $_.name })
+if ($names -notcontains $Model) {
+    throw "The pull reported success but the running server does not list $Model (it lists: $(if ($names) { $names -join ', ' } else { 'nothing' })). The model went to a different server's store. Run repair-ollama-host.ps1."
+}
+Ok "model pulled and served by this instance ($($names -join ', '))"
 
 # ── 6. Verify it is actually on the GPU ────────────────────────────────────
 Step 'Verifying GPU offload'

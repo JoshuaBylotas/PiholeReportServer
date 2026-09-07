@@ -52,14 +52,15 @@ public sealed class AiClient
 
     public int MaxSummaryRows => _opt.MaxSummaryRows;
 
-    /// <summary>
-    /// The schema the model is given. Kept deliberately terse — prompt tokens are
-    /// evaluated at roughly 26/sec on the inference host, so every line of schema is
-    /// real latency on every question.
-    /// </summary>
     /// <summary>Shared with the agent, so both describe the same schema.</summary>
     internal const string SchemaForAgent = SchemaPrompt;
 
+    /// <summary>
+    /// The schema the model is given. Still kept tight, but no longer for latency:
+    /// the GPU host evaluates prompt tokens at roughly 1,700/sec, so schema length
+    /// costs milliseconds rather than the seconds it cost on CPU. It stays terse
+    /// because a shorter schema is one the model follows more reliably.
+    /// </summary>
     private const string SchemaPrompt = """
         You write Microsoft SQL Server (T-SQL) SELECT queries over a Pi-hole DNS warehouse.
         Reply ONLY with JSON: {"sql": "...", "notes": "one short sentence"}
@@ -68,8 +69,17 @@ public sealed class AiClient
         dbo.PiholeQueries(id bigint, ts datetime2 UTC, type int, status int, status_text varchar,
           domain varchar(255), client varchar(255) = IP, forward varchar(255), reply_type int,
           reply_time float SECONDS, dnssec int, ede int)
-        dbo.DimClient(ip, name, mac, mac_vendor, interface, num_queries, last_query)
-          -- device name column is "name"; vendor is "mac_vendor"; join dc.ip = q.client
+        dbo.DimClient(ip, name, mac, mac_vendor, interface, num_queries, last_query,
+          reported_name, name_ambiguous bit)
+          -- ONE ROW PER IP, so a device with IPv4 + several IPv6 addresses has
+          -- several rows. Device name column is "name"; vendor is "mac_vendor";
+          -- join dc.ip = q.client.
+          -- num_queries is a LIFETIME PER-DEVICE total that FTL copies onto every
+          -- one of that device's IP rows. NEVER SUM it - that multiplies by the
+          -- number of addresses (52 devices here, one inflated 6x). Use
+          -- MAX(num_queries) GROUP BY mac, and prefer counting PiholeQueries.
+          -- name_ambiguous=1 means reverse DNS returned this name for several
+          -- distinct devices, so the name is not trustworthy: group by mac.
         dbo.DimType(type, type_text)
         dbo.DimStatus(status, status_text)
         dbo.GravityDomains(domain, adlist_id) -- one row per (domain, adlist) pair
@@ -93,6 +103,9 @@ public sealed class AiClient
           it holds one row per (domain, adlist) and a join multiplies the counts.
         - reply_time is seconds; multiply by 1000 to report milliseconds.
         - Prefer COUNT_BIG(*) over COUNT(*) on this table.
+        - Count activity from PiholeQueries. DimClient.num_queries is a lifetime
+          per-device figure duplicated across IP rows and is not comparable to it.
+        - Per-device totals: GROUP BY dc.mac, not dc.ip and not dc.name.
         - For "what kind of traffic is this", join dbo.DomainCategory rather than
           guessing from the domain name.
         """;

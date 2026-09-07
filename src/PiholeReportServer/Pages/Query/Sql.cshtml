@@ -141,8 +141,21 @@
                 </tr>
                 <tr>
                     <td><code>dbo.DimClient</code></td>
-                    <td class="mono">ip, name, mac, mac_vendor, interface, num_queries, last_query</td>
-                    <td>Join on <code>DimClient.ip = PiholeQueries.client</code>. The device name column is <code>name</code>, and the OUI lookup is <code>mac_vendor</code>.</td>
+                    <td class="mono">ip, name, mac, mac_vendor, interface, num_queries, last_query, reported_name, name_ambiguous</td>
+                    <td>
+                        One row per <em>IP</em>, so a device with IPv4 and several IPv6 addresses
+                        appears more than once &mdash; group by <code>mac</code> for per-device
+                        totals. Join on <code>DimClient.ip = PiholeQueries.client</code>. The
+                        device name column is <code>name</code>; the OUI lookup is
+                        <code>mac_vendor</code>.
+                        <strong>Do not <code>SUM(num_queries)</code></strong> &mdash; it is a
+                        lifetime per-device total that FTL repeats on every one of that
+                        device&#8217;s IP rows, so summing multiplies it. Use
+                        <code>MAX(num_queries)</code> grouped by <code>mac</code>, or count
+                        <code>PiholeQueries</code> instead.
+                        <code>name_ambiguous = 1</code> flags a name reverse DNS returned for
+                        several different devices.
+                    </td>
                 </tr>
                 <tr>
                     <td><code>dbo.DimType</code></td>

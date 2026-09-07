@@ -158,7 +158,37 @@ fi
 # ── 4. Model ───────────────────────────────────────────────────────────────
 step "Pulling $MODEL"
 ollama pull "$MODEL"
-ok 'model pulled'
+
+# A pull that prints "success" says nothing about WHICH server stored it. Two
+# servers can hold one port when one binds the IPv6 wildcard and the other IPv4
+# loopback, in which case the model lands in one store and remote clients talk
+# to the other, which 404s every request while all local tests pass. So ask the
+# running server what it can actually serve.
+if ! curl -sf -m 60 http://127.0.0.1:11434/api/tags | grep -q "\"$MODEL\""; then
+    echo "ERROR: the pull reported success but the running server does not list $MODEL." >&2
+    echo "       It lists: $(curl -sf -m 60 http://127.0.0.1:11434/api/tags || echo '<no response>')" >&2
+    echo "       Another ollama server is probably holding the port. Check:" >&2
+    echo "         sudo ss -lntp | grep 11434" >&2
+    exit 1
+fi
+ok 'model pulled and served by this instance'
+
+# Exactly one listener, on a wildcard address: that is what makes it reachable
+# from the report server. A loopback-only bind means OLLAMA_HOST never applied.
+if command -v ss >/dev/null 2>&1; then
+    LSN="$(ss -lnt '( sport = :11434 )' | tail -n +2 | awk '{print $4}')"
+    N="$(printf '%s
+' "$LSN" | grep -c . || true)"
+    if [ "$N" -gt 1 ]; then
+        warn "$N listeners on 11434 ($(echo $LSN)) - local tests will pass and remote ones will fail"
+    elif printf '%s' "$LSN" | grep -qE '^(127\.0\.0\.1|\[::1\])'; then
+        echo "ERROR: listening on loopback only ($LSN); no other host can connect." >&2
+        echo "       OLLAMA_HOST did not take effect. Check: sudo systemctl show ollama -p Environment" >&2
+        exit 1
+    else
+        ok "single listener on the wildcard address ($LSN)"
+    fi
+fi
 
 # ── 5. Verify it is actually on the GPU ────────────────────────────────────
 step 'Verifying GPU offload'
