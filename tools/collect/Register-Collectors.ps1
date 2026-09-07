@@ -63,9 +63,11 @@ function Warn($m) { Write-Host "  WARN $m" -ForegroundColor Yellow }
 
 $here   = $PSScriptRoot
 $repo   = Split-Path -Parent (Split-Path -Parent $here)
-$scripts = @('Collect-AdDnsNames.ps1', 'Collect-OmadaNames.ps1')
+# CollectorLogging.ps1 is dot-sourced by both, so it has to travel with them.
+$scripts = @('Collect-AdDnsNames.ps1', 'Collect-OmadaNames.ps1', 'CollectorLogging.ps1')
 $credSrc = Join-Path $repo 'private\omada.json'
 
+# Only the two collectors get a task; CollectorLogging.ps1 is a library.
 $TaskNames = @{
     'Collect-AdDnsNames.ps1' = 'PiholeReport-CollectAdDnsNames'
     'Collect-OmadaNames.ps1' = 'PiholeReport-CollectOmadaNames'
@@ -144,6 +146,27 @@ Invoke-Command -ComputerName $ComputerName -ArgumentList $InstallPath -ScriptBlo
     Set-Acl -Path $f -AclObject $acl
 }
 Ok 'credential file restricted to SYSTEM and Administrators'
+
+# ── Event log ───────────────────────────────────────────────────────────────
+Step 'Event log'
+
+# Registering a source needs administrator. Doing it here, once, means the task
+# itself never needs to - and a failure to create it is visible now rather than
+# at 00:30 in a log that does not exist yet.
+$logState = Invoke-Command -ComputerName $ComputerName -ScriptBlock {
+    try {
+        if ([System.Diagnostics.EventLog]::SourceExists('PiholeCollectors')) {
+            $log = [System.Diagnostics.EventLog]::LogNameFromSourceName('PiholeCollectors', '.')
+            "source already registered against log '$log'"
+        } else {
+            New-EventLog -LogName 'PiholeReportServer' -Source 'PiholeCollectors' -ErrorAction Stop
+            'created log PiholeReportServer with source PiholeCollectors'
+        }
+    } catch {
+        "FAILED: $($_.Exception.Message)"
+    }
+}
+if ($logState -like 'FAILED*') { Warn $logState } else { Ok $logState }
 
 # ── Schedule ────────────────────────────────────────────────────────────────
 Step 'Registering tasks'
@@ -230,7 +253,7 @@ foreach ($r in $run) {
     if ($r.Result -eq 0) {
         Ok "$($r.Task) succeeded in ~$($r.Seconds)s"
     } else {
-        Warn "$($r.Task) exited with $($r.Result) - check Task Scheduler history on $ComputerName"
+        Warn "$($r.Task) exited with $($r.Result) - see the PiholeReportServer event log on $ComputerName"
         $failed++
     }
 }

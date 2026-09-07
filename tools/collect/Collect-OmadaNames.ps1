@@ -60,31 +60,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# A scheduled task's console output goes nowhere, so a failure at 00:30 is
-# invisible. Transcript to a dated file beside the script, keeping a fortnight.
-$script:LogDir = Join-Path $PSScriptRoot 'logs'
-try {
-    if (-not (Test-Path $script:LogDir)) { New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null }
-    Start-Transcript -Path (Join-Path $script:LogDir ("{0}-{1}.log" -f
-        [IO.Path]::GetFileNameWithoutExtension($PSCommandPath), (Get-Date -Format 'yyyyMMdd-HHmmss'))) | Out-Null
-    Get-ChildItem $script:LogDir -Filter '*.log' -ErrorAction SilentlyContinue |
-        Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-14) } |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-} catch {
-    # Logging is a convenience. Never let it stop the collection.
-}
+# Everything this run prints also goes to the Windows event log, as one event
+# under Applications and Services Logs -> PiholeReportServer. A scheduled task's
+# console output goes nowhere, and a transcript on a domain controller is
+# somewhere nobody looks; the event log is where this machine's other failures
+# already surface.
+$script:RunScriptName = $MyInvocation.MyCommand.Name
+. (Join-Path $PSScriptRoot 'CollectorLogging.ps1')
 
-# Report a real exit code: Task Scheduler shows LastTaskResult, and a script that
-# throws but exits 0 looks like a success in the history.
+# Report a real exit code AND an event. A script that throws but exits 0 shows in
+# Task Scheduler history as a success, which is worse than no history at all.
 trap {
     Write-Host "  FAIL $($_.Exception.Message)" -ForegroundColor Red
-    try { Stop-Transcript | Out-Null } catch { }
+    Write-RunEvent -Failure ("{0}`n{1}" -f $_.Exception.Message, $_.ScriptStackTrace)
     exit 1
 }
-
-function Step($m) { Write-Host "`n=== $m ===" -ForegroundColor Cyan }
-function Ok($m)   { Write-Host "  OK   $m" -ForegroundColor Green }
-function Warn($m) { Write-Host "  WARN $m" -ForegroundColor Yellow }
 
 # ── HTTP, the long way round ────────────────────────────────────────────────
 #
@@ -210,7 +200,7 @@ $cred = Get-Content $CredentialPath -Raw | ConvertFrom-Json
 foreach ($f in 'omadacId', 'clientId', 'clientSecret') {
     if (-not $cred.$f) { throw "$CredentialPath is missing '$f'." }
 }
-Ok "loaded for omadacId $($cred.omadacId.Substring(0, 8))…"
+Ok "loaded for omadacId $($cred.omadacId.Substring(0, 8))..."
 
 # ── Token ───────────────────────────────────────────────────────────────────
 Step 'Authenticating'
@@ -244,7 +234,9 @@ $siteList = @($sites.result.data)
 if ($siteList.Count -eq 0) {
     throw 'The credential can see no sites. Check the scope on the OpenAPI app.'
 }
-$siteList | ForEach-Object { "  $($_.name)  ($($_.siteId))" }
+# Detail, not bare output: anything written straight to the pipeline never
+# reaches the buffer, so the section arrived in the event as an empty heading.
+$siteList | ForEach-Object { Detail "$($_.name)  ($($_.siteId))" }
 
 # ── Clients ─────────────────────────────────────────────────────────────────
 Step 'Clients'
@@ -329,7 +321,7 @@ Ok "$($rows.Count) named device(s): $typedCount named in the controller, $($rows
 
 if ($WhatIfPreference) {
     $rows.Values | Sort-Object Source, Name | Select-Object -First 40 |
-        ForEach-Object { "  {0,-11} {1,-20} {2,-16} {3}" -f $_.Source, $_.Mac, $_.Ip, $_.Name }
+        ForEach-Object { Detail ("{0,-11} {1,-20} {2,-16} {3}" -f $_.Source, $_.Mac, $_.Ip, $_.Name) }
     Warn "-WhatIf: $($rows.Count) row(s) not written"
     return
 }
@@ -395,11 +387,11 @@ FROM dbo.vClient WHERE mac IS NOT NULL;
 '@
 $r = $check.ExecuteReader()
 while ($r.Read()) {
-    "  {0} device(s): {1} named in Omada, {2} from AD DNS, {3} self-announced, {4} still FTL, {5} unnamed" -f `
-        $r['devices'], $r['omada'], $r['addns'], $r['announced'], $r['still_ftl'], $r['unnamed']
+    Detail ("{0} device(s): {1} named in Omada, {2} from AD DNS, {3} self-announced, {4} still FTL, {5} unnamed" -f `
+        $r['devices'], $r['omada'], $r['addns'], $r['announced'], $r['still_ftl'], $r['unnamed'])
 }
 $r.Close()
 $conn.Close()
 
-try { Stop-Transcript | Out-Null } catch { }
+Write-RunEvent
 exit 0

@@ -56,31 +56,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# A scheduled task's console output goes nowhere, so a failure at 00:30 is
-# invisible. Transcript to a dated file beside the script, keeping a fortnight.
-$script:LogDir = Join-Path $PSScriptRoot 'logs'
-try {
-    if (-not (Test-Path $script:LogDir)) { New-Item -ItemType Directory -Path $script:LogDir -Force | Out-Null }
-    Start-Transcript -Path (Join-Path $script:LogDir ("{0}-{1}.log" -f
-        [IO.Path]::GetFileNameWithoutExtension($PSCommandPath), (Get-Date -Format 'yyyyMMdd-HHmmss'))) | Out-Null
-    Get-ChildItem $script:LogDir -Filter '*.log' -ErrorAction SilentlyContinue |
-        Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-14) } |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-} catch {
-    # Logging is a convenience. Never let it stop the collection.
-}
+# Everything this run prints also goes to the Windows event log, as one event
+# under Applications and Services Logs -> PiholeReportServer. A scheduled task's
+# console output goes nowhere, and a transcript on a domain controller is
+# somewhere nobody looks; the event log is where this machine's other failures
+# already surface.
+$script:RunScriptName = $MyInvocation.MyCommand.Name
+. (Join-Path $PSScriptRoot 'CollectorLogging.ps1')
 
-# Report a real exit code: Task Scheduler shows LastTaskResult, and a script that
-# throws but exits 0 looks like a success in the history.
+# Report a real exit code AND an event. A script that throws but exits 0 shows in
+# Task Scheduler history as a success, which is worse than no history at all.
 trap {
     Write-Host "  FAIL $($_.Exception.Message)" -ForegroundColor Red
-    try { Stop-Transcript | Out-Null } catch { }
+    Write-RunEvent -Failure ("{0}`n{1}" -f $_.Exception.Message, $_.ScriptStackTrace)
     exit 1
 }
-
-function Step($m) { Write-Host "`n=== $m ===" -ForegroundColor Cyan }
-function Ok($m)   { Write-Host "  OK   $m" -ForegroundColor Green }
-function Warn($m) { Write-Host "  WARN $m" -ForegroundColor Yellow }
 
 # A hostname that is just a MAC in either separator style. True, and useless.
 $MacShaped = '^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$'
@@ -129,7 +119,7 @@ $contested = $usable | Group-Object IP | Where-Object { ($_.Group.HostName | Sor
 if ($contested) {
     Warn "$($contested.Count) address(es) claimed by more than one name - skipping them:"
     $contested | Select-Object -First 6 | ForEach-Object {
-        Write-Host "         $($_.Name): $((($_.Group.HostName | Sort-Object -Unique) -join ', '))"
+        Detail "$($_.Name): $((($_.Group.HostName | Sort-Object -Unique) -join ', '))"
     }
 }
 $contestedIps = @($contested.Name)
@@ -175,7 +165,7 @@ Step 'Writing observations'
 
 if ($WhatIfPreference) {
     $rows.Values | Sort-Object Name | Select-Object -First 25 |
-        ForEach-Object { "  {0,-20} {1,-18} {2}" -f $_.Mac, $_.Ip, $_.Name }
+        ForEach-Object { Detail ("{0,-20} {1,-18} {2}" -f $_.Mac, $_.Ip, $_.Name) }
     Warn "-WhatIf: $($rows.Count) row(s) not written"
     $conn.Close()
     return
@@ -230,18 +220,13 @@ FROM dbo.vClient WHERE mac IS NOT NULL;
 '@
 $r = $check.ExecuteReader()
 while ($r.Read()) {
-    "  {0} device(s) with a MAC: {1} named from AD DNS, {2} still on FTL, {3} unnamed" -f `
-        $r['devices'], $r['from_addns'], $r['still_ftl'], $r['unnamed']
+    Detail ("{0} device(s) with a MAC: {1} named from AD DNS, {2} still on FTL, {3} unnamed" -f `
+        $r['devices'], $r['from_addns'], $r['still_ftl'], $r['unnamed'])
 }
 $r.Close()
 $conn.Close()
 
-Write-Host @"
+Detail 'AD DNS can only name what it has a clean record for; the controller is the better source.'
 
-  AD DNS can only name what it has a clean record for. The Omada controller is
-  the better source - it is the DHCP server and it holds the names you assigned -
-  so run Collect-OmadaNames.ps1 as well once its API credentials are configured.
-"@ -ForegroundColor Cyan
-
-try { Stop-Transcript | Out-Null } catch { }
+Write-RunEvent
 exit 0

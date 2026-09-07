@@ -125,6 +125,16 @@ Invoke-Command -ComputerName $Server -ArgumentList $SitePath -ScriptBlock {
 }
 Ok 'IIS_IUSRS granted read/execute'
 
+# ── 4b. Event log ──────────────────────────────────────────────────────────
+Step 'Event log'
+
+# The app logs to the Windows event log, and registering a source needs
+# administrator - which the app pool is not. If the source is missing the provider
+# drops messages silently rather than failing to start, so a host that was never
+# registered looks healthy and logs nothing. Do it on every deploy; it is a no-op
+# once it exists.
+& (Join-Path $PSScriptRoot 'Register-EventLog.ps1') -ComputerName $Server
+
 # ── 5. Start and verify ────────────────────────────────────────────────────
 Step 'Starting'
 

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Mvc.Authorization;
+using Microsoft.Extensions.Logging.EventLog;
 using Microsoft.Identity.Web;
 using Microsoft.Identity.Web.UI;
 using PiholeReportServer.Configuration;
@@ -97,6 +98,53 @@ builder.Services.AddScoped<SavedReportStore>();
 // like the other SQL-backed stores; the facts live in the database, not in memory,
 // because being taught something once should survive a recycle.
 builder.Services.AddScoped<AnalystMemoryStore>();
+// Under IIS, ILogger output goes nowhere by default: stdout logging is off in
+// web.config, and a log file on the web server is somewhere nobody looks. The
+// event log is where this machine's other failures already surface.
+//
+// The source must already exist - registering one needs administrator, and the
+// app pool is not. tools/deploy/Register-EventLog.ps1 creates it; if it is
+// missing, the provider silently drops messages rather than failing to start,
+// which is the right trade for a logging sink but does mean the source has to be
+// created deliberately.
+if (OperatingSystem.IsWindows())
+{
+    AddWindowsEventLog(builder.Logging);
+}
+
+// Annotating a method rather than suppressing CA1416: suppression would hide a
+// real portability check everywhere else too. The settings go in an object rather
+// than a configure lambda because the attribute does not reach inside a lambda -
+// the analyzer treats that closure as reachable on any platform and flags the
+// assignments on their own.
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
+static void AddWindowsEventLog(ILoggingBuilder logging)
+{
+    // The host already registers an EventLogLoggerProvider on Windows, writing to
+    // the Application log as ".NET Runtime". AddEventLog uses TryAddEnumerable,
+    // which de-duplicates by implementation type - so simply calling it leaves the
+    // default in place and DISCARDS these settings without a word. The symptom is
+    // events appearing in Application while the custom log stays empty.
+    //
+    // Remove the existing registration first, so there is exactly one provider and
+    // it is this one.
+    var existing = logging.Services
+        .Where(d => d.ServiceType == typeof(ILoggerProvider)
+                    && (d.ImplementationType == typeof(EventLogLoggerProvider)
+                        || d.ImplementationInstance is EventLogLoggerProvider))
+        .ToList();
+    foreach (var d in existing)
+    {
+        logging.Services.Remove(d);
+    }
+
+    logging.AddEventLog(new EventLogSettings
+    {
+        LogName = "PiholeReportServer",
+        SourceName = "ReportServer",
+    });
+}
+
 // Singleton: it remembers that the preferred inference host is unreachable, and
 // that has to outlive one request or every request pays the connect timeout again.
 builder.Services.AddSingleton<AiEndpointSelector>();
@@ -175,5 +223,25 @@ app.UseAuthorization();
 
 app.MapRazorPages();
 app.MapHealthChecks("/healthz").AllowAnonymous();
+
+// One line per start, in the app's own category so it reaches the event log at
+// Information. Worth having on its own - an app pool that is quietly recycling
+// every few minutes is otherwise invisible - and it is the only proof that the
+// event source is wired up, since a clean start logs nothing else.
+{
+    var startupLog = app.Services.GetRequiredService<ILoggerFactory>()
+                        .CreateLogger("PiholeReportServer.Startup");
+    var aiHosts = app.Services.GetRequiredService<AiEndpointSelector>();
+    startupLog.LogInformation(
+        "Started. Environment={Environment} SqlServer={SqlServer} SqlAuth={SqlAuth} " +
+        "Ai={AiEnabled} AiHost={AiHost} AiStandby={AiStandby} Nightly={Nightly}",
+        app.Environment.EnvironmentName,
+        builder.Configuration["Sql:Server"],
+        sqlAuthMode,
+        builder.Configuration.GetValue("Ai:Enabled", false),
+        aiHosts.Primary.Endpoint,
+        aiHosts.Fallback?.Endpoint ?? "(none)",
+        builder.Configuration.GetValue("Ai:NightlyAnalysisEnabled", false));
+}
 
 app.Run();
