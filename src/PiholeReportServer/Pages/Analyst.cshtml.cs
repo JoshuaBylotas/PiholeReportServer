@@ -21,11 +21,13 @@ public sealed class AnalystModel : PageModel
 {
     private readonly AiAgent _agent;
     private readonly AiOptions _opt;
+    private readonly AiEndpointSelector _hosts;
 
-    public AnalystModel(AiAgent agent, IOptions<AiOptions> opt)
+    public AnalystModel(AiAgent agent, IOptions<AiOptions> opt, AiEndpointSelector hosts)
     {
         _agent = agent;
         _opt = opt.Value;
+        _hosts = hosts;
     }
 
     [BindProperty]
@@ -40,7 +42,18 @@ public sealed class AnalystModel : PageModel
 
     public int BudgetSeconds => _opt.AgentBudgetSeconds;
 
-    public string Model => _opt.Model;
+    /// <summary>
+    /// The model actually in use. This is not <c>Ai:Model</c>: when the preferred host
+    /// is away the standby serves a smaller model, and the page would otherwise name
+    /// one that is not answering.
+    /// </summary>
+    public string Model => _hosts.Current.Model;
+
+    /// <summary>True while the preferred host is unreachable and the standby is serving.</summary>
+    public bool UsingFallback => _hosts.Current.IsFallback;
+
+    /// <summary>Host serving requests right now.</summary>
+    public string ActiveEndpoint => _hosts.Current.Endpoint;
 
     /// <summary>Starting points, so the page is not a blank box.</summary>
     public static readonly string[] Examples =

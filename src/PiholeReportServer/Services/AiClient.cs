@@ -31,24 +31,32 @@ public sealed class AiClient
 
     private readonly HttpClient _http;
     private readonly AiOptions _opt;
+    private readonly AiEndpointSelector _hosts;
     private readonly ILogger<AiClient> _log;
 
-    public AiClient(HttpClient http, IOptions<AiOptions> opt, ILogger<AiClient> log)
+    public AiClient(
+        HttpClient http, IOptions<AiOptions> opt, AiEndpointSelector hosts, ILogger<AiClient> log)
     {
         _opt = opt.Value;
+        _hosts = hosts;
         _log = log;
         _http = http;
 
-        if (!string.IsNullOrWhiteSpace(_opt.Endpoint))
-        {
-            _http.BaseAddress = new Uri(_opt.Endpoint.TrimEnd('/') + "/");
-        }
+        // No BaseAddress: which host a request goes to is decided per request now, and
+        // BaseAddress is shared mutable state on a client the factory pools.
         _http.Timeout = TimeSpan.FromSeconds(Math.Max(30, _opt.TimeoutSeconds));
     }
 
     public bool Enabled => _opt.Enabled && !string.IsNullOrWhiteSpace(_opt.Endpoint);
 
-    public string Model => _opt.Model;
+    /// <summary>The model currently in use, which differs when the fallback is active.</summary>
+    public string Model => _hosts.Current.Model;
+
+    /// <summary>The host currently in use, so the UI can say where an answer came from.</summary>
+    public string ActiveEndpoint => _hosts.Current.Endpoint;
+
+    /// <summary>True while the preferred host is unreachable and the standby is serving.</summary>
+    public bool UsingFallback => _hosts.Current.IsFallback;
 
     public int MaxSummaryRows => _opt.MaxSummaryRows;
 
@@ -115,9 +123,9 @@ public sealed class AiClient
     {
         EnsureEnabled();
 
-        var request = new OllamaGenerate
+        var reply = await WithFailoverAsync((target, token) => PostAsync(new OllamaGenerate
         {
-            Model = _opt.Model,
+            Model = target.Model,
             System = SchemaPrompt,
             Prompt = question,
             Stream = false,
@@ -127,9 +135,7 @@ public sealed class AiClient
                 Temperature = _opt.Temperature,
                 NumPredict = _opt.MaxOutputTokens,
             },
-        };
-
-        var reply = await PostAsync(request, ct);
+        }, target, token), ct);
 
         // format:"json" constrains the grammar, but a truncated or odd completion is
         // still possible, so parse defensively rather than trusting it.
@@ -174,9 +180,9 @@ public sealed class AiClient
     {
         EnsureEnabled();
 
-        var request = new OllamaGenerate
+        var reply = await WithFailoverAsync((target, token) => PostAsync(new OllamaGenerate
         {
-            Model = _opt.Model,
+            Model = target.Model,
             System = """
                 You are a network analyst summarising a DNS query report for its owner.
                 You are given exact pre-computed statistics, not raw rows.
@@ -192,9 +198,9 @@ public sealed class AiClient
                 Temperature = 0.2,
                 NumPredict = Math.Min(_opt.MaxOutputTokens, 350),
             },
-        };
+        }, target, token), ct);
 
-        return (await PostAsync(request, ct)).Trim();
+        return reply.Trim();
     }
 
     /// <summary>
@@ -212,36 +218,39 @@ public sealed class AiClient
             cts.CancelAfter(timeout);
         }
 
-        var request = new OllamaChat
+        return await WithFailoverAsync(async (target, token) =>
         {
-            Model = _opt.Model,
-            Messages = messages.Select(m => new OllamaMessage { Role = m.Role, Content = m.Content }).ToList(),
-            Stream = false,
-            Format = "json",
-            Options = new OllamaOptions
+            var request = new OllamaChat
             {
-                Temperature = _opt.Temperature,
-                NumPredict = _opt.MaxOutputTokens,
-            },
-        };
+                Model = target.Model,
+                Messages = messages
+                    .Select(m => new OllamaMessage { Role = m.Role, Content = m.Content }).ToList(),
+                Stream = false,
+                Format = "json",
+                Options = new OllamaOptions
+                {
+                    Temperature = _opt.Temperature,
+                    NumPredict = _opt.MaxOutputTokens,
+                },
+            };
 
-        try
-        {
-            using var resp = await _http.PostAsJsonAsync("api/chat", request, Json, cts.Token);
-            if (!resp.IsSuccessStatusCode)
+            try
+            {
+                using var resp = await _http.PostAsJsonAsync(target.Uri("api/chat"), request, Json, token);
+                if (!resp.IsSuccessStatusCode)
+                {
+                    throw new InvalidOperationException(
+                        $"The inference server returned HTTP {(int)resp.StatusCode} on chat.");
+                }
+                var payload = await resp.Content.ReadFromJsonAsync<OllamaChatResponse>(Json, token);
+                return payload?.Message?.Content ?? "";
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
                 throw new InvalidOperationException(
-                    $"The inference server returned HTTP {(int)resp.StatusCode} on chat.");
+                    $"{target.Endpoint} ran out of time on this step. Try a narrower question.");
             }
-            var payload = await resp.Content.ReadFromJsonAsync<OllamaChatResponse>(Json, cts.Token);
-            return payload?.Message?.Content ?? "";
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            throw new InvalidOperationException(
-                "The inference server ran out of time on this step. It runs on CPU, so a " +
-                "complex question can exceed the budget - try a narrower one.");
-        }
+        }, cts.Token);
     }
 
     /// <summary>Availability probe for the diagnostics page.</summary>
@@ -252,12 +261,34 @@ public sealed class AiClient
             return (false, "Disabled by configuration (Ai:Enabled).");
         }
 
+        // Probe both hosts rather than only the active one. The whole value of a
+        // standby is knowing whether it is actually there BEFORE it is needed; a
+        // silently broken fallback is worse than none, because it reads as cover.
+        var primary = await ProbeOneAsync(_hosts.Primary, ct);
+        if (_hosts.Fallback is null)
+        {
+            return primary;
+        }
+
+        var fallback = await ProbeOneAsync(_hosts.Fallback, ct);
+        var cooldown = _hosts.PrimaryCooldownRemaining;
+        var note = cooldown is null
+            ? ""
+            : $" Primary is in cooldown for another {cooldown.Value.TotalSeconds:N0}s, " +
+              "so requests are going to the standby.";
+
+        return (primary.Ok || fallback.Ok,
+                $"Primary: {primary.Detail} Standby: {fallback.Detail}{note}");
+    }
+
+    private async Task<(bool Ok, string Detail)> ProbeOneAsync(AiTarget target, CancellationToken ct)
+    {
         try
         {
-            using var resp = await _http.GetAsync("api/tags", ct);
+            using var resp = await _http.GetAsync(target.Uri("api/tags"), ct);
             if (!resp.IsSuccessStatusCode)
             {
-                return (false, $"{_opt.Endpoint} returned HTTP {(int)resp.StatusCode}.");
+                return (false, $"{target.Endpoint} returned HTTP {(int)resp.StatusCode}.");
             }
 
             var body = await resp.Content.ReadAsStringAsync(ct);
@@ -270,17 +301,61 @@ public sealed class AiClient
                 : [];
 
             var present = models.Any(x =>
-                string.Equals(x, _opt.Model, StringComparison.OrdinalIgnoreCase));
+                string.Equals(x, target.Model, StringComparison.OrdinalIgnoreCase));
 
             return present
-                ? (true, $"{_opt.Endpoint} — model '{_opt.Model}' loaded.")
-                : (false, $"{_opt.Endpoint} is reachable but '{_opt.Model}' is not installed " +
+                ? (true, $"{target.Endpoint} — model '{target.Model}' available.")
+                : (false, $"{target.Endpoint} is reachable but '{target.Model}' is not installed " +
                           $"(available: {(models.Count == 0 ? "none" : string.Join(", ", models))}).");
         }
         catch (Exception ex)
         {
-            return (false, $"{_opt.Endpoint} unreachable: {ex.Message}");
+            return (false, $"{target.Endpoint} unreachable: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Runs one logical request, moving to the standby host if the chosen one cannot
+    /// be reached at all.
+    /// <para>
+    /// Only <see cref="HttpRequestException"/> triggers failover — a refused
+    /// connection, a DNS failure, no route. A timeout does not, and nor does an HTTP
+    /// error status: both mean a server answered, and the standby is the slower
+    /// machine, so failing over on slowness would only produce a slower failure.
+    /// </para>
+    /// </summary>
+    private async Task<T> WithFailoverAsync<T>(
+        Func<AiTarget, CancellationToken, Task<T>> attempt, CancellationToken ct)
+    {
+        var targets = _hosts.Attempts();
+        HttpRequestException? last = null;
+
+        for (var i = 0; i < targets.Count; i++)
+        {
+            var target = targets[i];
+            try
+            {
+                var result = await attempt(target, ct);
+                _hosts.ReportReachable(target);
+                return result;
+            }
+            catch (HttpRequestException ex) when (!ct.IsCancellationRequested)
+            {
+                _hosts.ReportUnreachable(target);
+                last = ex;
+                if (i + 1 < targets.Count)
+                {
+                    _log.LogWarning(
+                        "AI: {Failed} could not be reached ({Reason}); trying {Next}.",
+                        target.Endpoint, ex.Message, targets[i + 1].Endpoint);
+                }
+            }
+        }
+
+        var where = targets.Count > 1
+            ? $"either inference host ({string.Join(" or ", targets.Select(t => t.Endpoint))})"
+            : $"the inference server at {targets[0].Endpoint}";
+        throw new InvalidOperationException($"Could not reach {where}: {last?.Message}", last);
     }
 
     private void EnsureEnabled()
@@ -292,11 +367,12 @@ public sealed class AiClient
         }
     }
 
-    private async Task<string> PostAsync(OllamaGenerate request, CancellationToken ct)
+    private async Task<string> PostAsync(
+        OllamaGenerate request, AiTarget target, CancellationToken ct)
     {
         try
         {
-            using var resp = await _http.PostAsJsonAsync("api/generate", request, Json, ct);
+            using var resp = await _http.PostAsJsonAsync(target.Uri("api/generate"), request, Json, ct);
             if (!resp.IsSuccessStatusCode)
             {
                 var detail = await resp.Content.ReadAsStringAsync(ct);
@@ -310,9 +386,10 @@ public sealed class AiClient
             if (payload.EvalCount > 0 && payload.EvalDuration > 0)
             {
                 _log.LogInformation(
-                    "AI: {Out} tokens in {Sec:F1}s ({Rate:F1} tok/s), prompt {In} tokens.",
+                    "AI: {Out} tokens in {Sec:F1}s ({Rate:F1} tok/s), prompt {In} tokens, on {Host}.",
                     payload.EvalCount, payload.EvalDuration / 1e9,
-                    payload.EvalCount / (payload.EvalDuration / 1e9), payload.PromptEvalCount);
+                    payload.EvalCount / (payload.EvalDuration / 1e9), payload.PromptEvalCount,
+                    target.Endpoint);
             }
 
             return payload.Response ?? "";
@@ -322,14 +399,11 @@ public sealed class AiClient
             // Distinguish "the host is slow" from "the user navigated away", because on
             // CPU-only hardware the former is common and the message should say so.
             throw new InvalidOperationException(
-                $"The inference server did not answer within {_opt.TimeoutSeconds}s. " +
-                "It runs on CPU, so long questions can exceed the timeout — try a narrower one.");
+                $"{target.Endpoint} did not answer within {_opt.TimeoutSeconds}s. " +
+                "Try a narrower question.");
         }
-        catch (HttpRequestException ex)
-        {
-            throw new InvalidOperationException(
-                $"Could not reach the inference server at {_opt.Endpoint}: {ex.Message}");
-        }
+        // HttpRequestException is deliberately NOT caught here: WithFailoverAsync must
+        // see it to decide whether to move to the standby host.
     }
 
     private static string Clip(string s) => s.Length <= 300 ? s : s[..300] + "…";

@@ -22,6 +22,17 @@
         Set <code>Ai:Enabled</code> and <code>Ai:Endpoint</code>.
     </div>
 }
+else if (Model.UsingFallback)
+{
+    <div class="notice notice-warn">
+        <strong>Running on the standby inference host.</strong>
+        The preferred host is unreachable, so questions are being answered by
+        <span class="mono">@Model.Model</span> on <span class="mono">@Model.ActiveEndpoint</span>.
+        Answers are still sound but noticeably slower, and a long investigation is
+        more likely to run out of time. It switches back on its own once the
+        preferred host returns.
+    </div>
+}
 
 <form method="post" class="card">
     <div class="field">
@@ -30,9 +41,9 @@
                placeholder="e.g. which device generates the most tracking traffic this week?"
                autocomplete="off" />
         <span class="help">
-            Runs on your own hardware. Expect up to @Model.BudgetSeconds seconds &mdash;
-            each step is a generation plus a database query, and <span class="mono">@Model.Model</span>
-            runs on CPU.
+            Runs on your own hardware, on <span class="mono">@Model.Model</span>. Each step
+            is a generation plus a database query, with a ceiling of
+            @Model.BudgetSeconds seconds for the whole investigation.
         </span>
     </div>
 

@@ -22,6 +22,34 @@ public sealed class AiOptions
     public string Model { get; set; } = "qwen2.5-coder:3b";
 
     /// <summary>
+    /// Optional second inference host, used only when <see cref="Endpoint"/> cannot be
+    /// reached at all.
+    /// <para>
+    /// The fast host here is a laptop that leaves the building, which would otherwise
+    /// take the AI features and the nightly job dark until it came back. Failover is
+    /// deliberately narrow: it triggers on a transport failure — refused connection,
+    /// DNS failure, no route — and never on a timeout or an HTTP error, because both
+    /// of those mean a server did answer, and the fallback is the slower machine.
+    /// Falling back on slowness would only make slowness worse.
+    /// </para>
+    /// </summary>
+    public string FallbackEndpoint { get; set; } = "";
+
+    /// <summary>
+    /// Model to ask for on the fallback host. Usually smaller than
+    /// <see cref="Model"/>, since the fallback exists because it is the lesser
+    /// machine. Falls back to <see cref="Model"/> when left empty.
+    /// </summary>
+    public string FallbackModel { get; set; } = "";
+
+    /// <summary>
+    /// How long to keep using the fallback before trying the primary again. Without
+    /// this every request would pay the primary's connect timeout while the fast host
+    /// is away; with it, only one request per interval does.
+    /// </summary>
+    public int FallbackRetryPrimarySeconds { get; set; } = 120;
+
+    /// <summary>
     /// Generous by default: a CPU-only host produces a few tokens per second, so a
     /// question can legitimately take the better part of a minute.
     /// </summary>

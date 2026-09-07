@@ -409,3 +409,97 @@ Get-Service PiholeReportServer
 
 And in the browser: **/Diagnostics** is the single fastest check — it shows your claims,
 the effective SQL identity, and a present/missing inventory of every expected object.
+
+## AI inference
+
+### The host answers locally but the report server is told the model does not exist
+
+`/api/tags` returns `{"models":[]}` and every generate request 404s, while on the
+inference host itself `ollama pull`, `ollama ps` and a `curl` to `127.0.0.1` all
+work perfectly.
+
+**Two Ollama servers are running.** Windows permits two processes to listen on one
+port when one binds the IPv6 wildcard and the other binds IPv4 loopback:
+
+```
+::           11434     <- ollama serve with OLLAMA_HOST=0.0.0.0 (the scheduled task)
+127.0.0.1    11434     <- a second server on stock defaults (usually the desktop app)
+```
+
+Neither fails to bind, so neither logs a problem. Every local client reaches the
+loopback server; a remote client arriving over IPv4 reaches the wildcard one. The
+model downloads into one server's store and the report server talks to the other.
+
+Confirm it, then repair it:
+
+```powershell
+Get-NetTCPConnection -LocalPort 11434 -State Listen |
+    Select-Object LocalAddress, LocalPort, OwningProcess
+tools\setup\repair-ollama-host.ps1
+```
+
+The repair script consolidates the model store rather than downloading the model a
+second time. If the Ollama **desktop app** is installed, remove it from the Startup
+folder as well, or it starts a second server again at the next logon.
+
+**The tell is the keep-alive.** `ollama ps` showing `UNTIL` about 5 minutes means the
+server answering is on stock defaults, because the scheduled task sets
+`OLLAMA_KEEP_ALIVE=60m`. A server started by this project always reports ~59 minutes.
+
+### A cold benchmark reports an absurd prompt-eval rate
+
+The first request after a server starts includes the model load in
+`prompt_eval_duration`. Loading a 9.6 GB model showed up once as "39 prompt tokens
+at 2.1 tok/s", which reads as a catastrophic fault and was ordinary disk I/O — the
+same measurement warm was 203 tok/s. Always issue one throwaway request before
+timing anything.
+
+### Answers are correct but far slower than expected
+
+Check the **Analyst** page for "Running on the standby inference host". The preferred
+host was unreachable, so requests moved to `Ai:FallbackEndpoint`, which is a slower
+machine running a smaller model.
+
+This is by design: the preferred host here is a laptop that leaves the network, and
+without a standby the AI features and the nightly job produce nothing while it is
+away. Nothing needs restarting — the preferred host is retried every
+`Ai:FallbackRetryPrimarySeconds` (default 120) and traffic returns on its own.
+
+**/Diagnostics** probes both hosts and names each one, so a standby that is itself
+broken is visible before it is needed.
+
+Failover is deliberately narrow. It triggers only on a transport failure — refused
+connection, DNS failure, no route. It does **not** trigger on a timeout or an HTTP
+error status, because both of those mean a server did answer, and the standby is the
+slower machine: failing over on slowness would only produce a slower failure.
+
+### The classifier on PI5-01 cannot reach the inference host
+
+```
+curl: (7) Failed to connect to 10.20.0.139 port 11434
+```
+
+The inference host's firewall rule is scoped to specific addresses. PI5-01 fetches
+page content **and** calls the model to classify it, so it is an inference client
+too and needs to be on that list:
+
+```powershell
+Set-NetFirewallRule -DisplayName 'Ollama (report server only)' `
+  -RemoteAddress '10.20.0.15','10.20.0.16','10.20.0.173','10.20.0.174'
+```
+
+Note that Windows Firewall evaluates **Block rules before Allow rules**. Adding a
+companion "block everything else" rule on the same port closes the port for the
+permitted addresses too. Do not add one — the default inbound action is already
+Block, so anything not matching the Allow is refused without help.
+
+### `env: 'python3\r': No such file or directory` on the Pi
+
+The fetch and classify scripts were copied from Windows and kept CRLF line endings,
+which breaks the shebang. `python3 script.py` still works, which is why this can go
+unnoticed until something invokes them directly.
+
+```bash
+sudo sed -i 's/\r$//' /opt/pihole-fetch/*.py
+```
+

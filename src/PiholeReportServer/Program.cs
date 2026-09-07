@@ -93,9 +93,22 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ClientDirectory>();
 builder.Services.AddScoped<AdlistDirectory>();
 builder.Services.AddScoped<SavedReportStore>();
+// Singleton: it remembers that the preferred inference host is unreachable, and
+// that has to outlive one request or every request pays the connect timeout again.
+builder.Services.AddSingleton<AiEndpointSelector>();
 // Typed client so the long inference timeout is scoped to this one dependency
 // rather than applied to every outbound call the app might make.
-builder.Services.AddHttpClient<AiClient>();
+builder.Services.AddHttpClient<AiClient>()
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        // Bound the CONNECT separately from the overall timeout. The preferred host
+        // is a laptop that leaves the network; an absent host can otherwise absorb
+        // ~21s of SYN retries before failing, and that delay would be paid before
+        // failover could even begin. Generation itself is unaffected - that is
+        // governed by HttpClient.Timeout.
+        ConnectTimeout = TimeSpan.FromSeconds(5),
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+    });
 builder.Services.AddScoped<AiAgent>();
 builder.Services.AddScoped<NightlyFindingStore>();
 // Hosted rather than a separate scheduled task: it reuses the same agent, guard and
