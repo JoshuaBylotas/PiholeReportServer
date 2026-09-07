@@ -98,7 +98,7 @@ public sealed class AnalystMemoryStore
         string fact,
         CancellationToken ct = default)
     {
-        kind = kind is "device" ? "device" : "note";
+        kind = kind is "device" or "rename" or "preference" ? kind : "note";
         subject = Trim(subject, MaxSubjectChars);
         target = string.IsNullOrWhiteSpace(target) ? null : Trim(target, MaxTargetChars);
         fact = Trim(fact, MaxFactChars);
@@ -115,6 +115,11 @@ public sealed class AnalystMemoryStore
         {
             return AnalystMemoryResult.Rejected(
                 "A device alias needs the name the network knows it by, so I can turn it into a filter.");
+        }
+        if (kind == "rename" && target is null)
+        {
+            return AnalystMemoryResult.Rejected(
+                "A rename needs the value to look for as well as what to show instead.");
         }
 
         const string sql = """
@@ -245,9 +250,9 @@ public sealed class AnalystMemoryStore
         }
 
         var sb = new StringBuilder();
-        sb.AppendLine("WHAT YOU HAVE BEEN TOLD ABOUT THIS NETWORK");
-        sb.AppendLine("These are standing facts from the owner. Treat them as true and use");
-        sb.AppendLine("them without being reminded.");
+        sb.AppendLine("WHAT YOU HAVE BEEN TOLD BY THE OWNER");
+        sb.AppendLine("Standing facts and instructions. Treat the facts as true and follow the");
+        sb.AppendLine("instructions without being reminded of them.");
 
         var devices = facts.Where(f => f.Kind == "device").ToList();
         if (devices.Count > 0)
@@ -263,7 +268,36 @@ public sealed class AnalystMemoryStore
             }
         }
 
-        var notes = facts.Where(f => f.Kind != "device").ToList();
+        // Preferences are instructions, not facts, so they get their own heading and
+        // an explicit "follow these without being asked". Mixed in with facts the
+        // model treats them as background colour and ignores them.
+        var prefs = facts.Where(f => f.Kind == "preference").ToList();
+        if (prefs.Count > 0)
+        {
+            sb.AppendLine("How they want results presented - follow these every time,");
+            sb.AppendLine("without being reminded and without mentioning that you did:");
+            foreach (var pref in prefs)
+            {
+                sb.Append("- ").AppendLine(pref.Fact);
+            }
+        }
+
+        // The model does not perform renames - they are applied to the output after
+        // the query runs. It is told about them only so its prose uses the same
+        // label the table will show, instead of the raw hostname.
+        var renames = facts.Where(f => f.Kind == "rename").ToList();
+        if (renames.Count > 0)
+        {
+            sb.AppendLine("Display names already applied to the table for them:");
+            foreach (var r in renames)
+            {
+                sb.Append("- ").Append(r.Target).Append(" and its variations appear as \"")
+                  .Append(r.Subject).AppendLine("\" - use that name when you refer to it.");
+            }
+            sb.AppendLine("Do NOT try to do this substitution in SQL; query the real values.");
+        }
+
+        var notes = facts.Where(f => f.Kind == "note").ToList();
         if (notes.Count > 0)
         {
             sb.AppendLine("Other facts:");
@@ -281,8 +315,16 @@ public sealed class AnalystMemoryStore
         sb.AppendLine("  {\"action\":\"remember\",\"kind\":\"device\",\"subject\":\"the spare laptop\",");
         sb.AppendLine("   \"target\":\"EXAMPLE-HOST-1\",\"fact\":\"The spare laptop is EXAMPLE-HOST-1\",");
         sb.AppendLine("   \"answer\":\"Noted - I'll remember that.\"}");
-        sb.AppendLine("Use kind \"note\" for anything that is not a device. Only do this when");
-        sb.AppendLine("they are telling you a fact to keep, not when they ask a question.");
+        sb.AppendLine("Kinds:");
+        sb.AppendLine("  device      an alias for a machine; target is the hostname, IP or MAC.");
+        sb.AppendLine("  preference  how they want results presented, e.g. \"always order");
+        sb.AppendLine("              descending\" or \"chart time series\". No target.");
+        sb.AppendLine("  rename      show one value in place of another; subject is what to");
+        sb.AppendLine("              display, target is the value to replace.");
+        sb.AppendLine("  note        any other standing fact. No target.");
+        sb.AppendLine("Only remember when they are TELLING you something to keep, not when they");
+        sb.AppendLine("ask a question. \"Show me X\" is a question; \"always show me X\" is a");
+        sb.AppendLine("preference worth remembering.");
         return sb.ToString();
     }
 

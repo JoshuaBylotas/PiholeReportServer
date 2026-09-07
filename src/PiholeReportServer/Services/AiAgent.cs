@@ -61,7 +61,7 @@ public sealed class AiAgent
 
     private string SystemPrompt => SystemPromptWith("");
 
-    private string SystemPromptWith(string memory) => $$"""
+    private string SystemPromptWith(string memory) => $$$"""
         You are talking with the owner of a home network about their DNS traffic. You
         have read-only SQL access to a Pi-hole warehouse. Be conversational: you are
         an assistant they are chatting with, not a query generator.
@@ -73,15 +73,26 @@ public sealed class AiAgent
 
         Always include the "action" field. A reply without it cannot be read.
 
-        {{AiClient.SchemaForAgent}}
+        An answer may also ask for a chart of the table, when the shape suits one:
 
-        {{memory}}
+          {"action":"answer","answer":"...",
+           "chart":{"type":"bar","label":"device","value":"queries"}}
+
+        type is "bar" (comparing categories), "line" (a series over time) or
+        "pie" (parts of a whole, only when there are few slices). label and value
+        must be COLUMN NAMES from your last query, label being the text axis and
+        value a number. Omit "chart" entirely when a table is clearer - a chart of
+        one row, or of forty unrelated ones, helps nobody.
+
+        {{{AiClient.SchemaForAgent}}}
+
+        {{{memory}}}
 
         HOW TO WORK
         - Start with the query that most directly addresses what they asked.
         - You will be shown a sample of the rows and exact totals. Use those figures.
         - Issue another query only if you genuinely need more. You have at most
-          {{MaxSteps}} queries.
+          {{{MaxSteps}}} queries.
         - When you have enough, answer.
 
         WHAT AN ANSWER SHOULD BE
@@ -214,6 +225,7 @@ public sealed class AiAgent
                 if (decision.Action == "answer" || !string.IsNullOrWhiteSpace(decision.Answer))
                 {
                     run.Answer = decision.Answer?.Trim();
+                    run.Chart = decision.Chart;
                     run.Outcome = run.HasAnswer ? AgentOutcome.Answered : AgentOutcome.Error;
                     if (!run.HasAnswer)
                     {
@@ -300,6 +312,7 @@ public sealed class AiAgent
                     run.ModelReplies.Add(final);
                     var last = Parse(final);
                     run.Answer = last?.Answer?.Trim();
+                    run.Chart = last?.Chart;
                     run.Outcome = run.HasAnswer ? AgentOutcome.Answered : AgentOutcome.StepLimit;
                 }
             }
@@ -386,6 +399,9 @@ public sealed class AiAgent
         public string? Subject { get; set; }
         public string? Target { get; set; }
         public string? Fact { get; set; }
+
+        /// <summary>Optional chart request accompanying an answer.</summary>
+        public ChartRequest? Chart { get; set; }
     }
 
     private Decision? Parse(string reply)

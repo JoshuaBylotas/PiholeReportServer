@@ -265,6 +265,14 @@
         }
 
         if (d.table && d.table.totalRows > 0) {
+            // Chart above the table: it is the summary, the table is the detail. If
+            // the data cannot support one, render() returns null and the table alone
+            // is shown - never an empty frame.
+            if (d.table.chart && window.ResultChart) {
+                var fig = window.ResultChart.render(
+                    d.table.chart, d.table.columns, d.table.rows);
+                if (fig) { body.appendChild(fig); }
+            }
             body.appendChild(renderTable(d.table));
         }
 
@@ -360,4 +368,47 @@
 
     grow();
     if (!input.disabled) { input.focus(); }
+})();
+
+/* ============================================================================
+   The "remember" form's fields mean different things per kind, so relabel them
+   rather than leaving one set of placeholders that is wrong for three of the
+   four. A preference and a note have no target at all.
+   ========================================================================= */
+(function () {
+    "use strict";
+
+    var form = document.querySelector("[data-memory-add]");
+    if (!form) { return; }
+
+    var kind = form.querySelector("[data-memory-kind]");
+    var subject = form.querySelector("[data-memory-subject]");
+    var target = form.querySelector("[data-memory-target]");
+    if (!kind || !subject || !target) { return; }
+
+    var SHAPES = {
+        device:     { subject: "Jason's phone",             target: "Pixel-9-Pro-XL" },
+        preference: { subject: "Always order results descending", target: null },
+        rename:     { subject: "Living Room PC",            target: "ALIEN01" },
+        note:       { subject: "The guest VLAN is 10.20.9.x", target: null }
+    };
+
+    function apply() {
+        var shape = SHAPES[kind.value] || SHAPES.note;
+        subject.placeholder = shape.subject;
+        if (shape.target === null) {
+            target.value = "";
+            target.hidden = true;
+            target.required = false;
+        } else {
+            target.hidden = false;
+            target.placeholder = shape.target;
+            // A device alias and a rename are both useless without something to
+            // match on, so the server rejects them; say so here instead.
+            target.required = true;
+        }
+    }
+
+    kind.addEventListener("change", apply);
+    apply();
 })();

@@ -76,6 +76,10 @@
     <script src="~/js/app.js" asp-append-version="true" defer></script>
     <script src="~/js/result-table.js" asp-append-version="true" defer></script>
     <script src="~/js/ai-panel.js" asp-append-version="true" defer></script>
+    @* Hand-written SVG rather than a CDN charting library: DNS history not leaving
+       the network is the point of this server, and a bar chart is not worth an
+       exception to that. *@
+    <script src="~/js/chart.js" asp-append-version="true" defer></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

@@ -40,14 +40,16 @@ else if (Model.UsingFallback)
     <summary>
         <strong>What I remember</strong>
         <span class="badge badge-pine" data-memory-count>@Model.Facts.Count</span>
-        <span class="small muted">&mdash; tell me things like &ldquo;the Pixel is Josh&rsquo;s phone&rdquo;</span>
+        <span class="small muted">
+            &mdash; devices, how you like results shown, and display names
+        </span>
     </summary>
 
     <ul class="memory-list" data-memory-list>
         @foreach (var f in Model.Facts)
         {
             <li>
-                <span class="badge @(f.IsDevice ? "badge-pine" : "badge-gold")">@(f.IsDevice ? "device" : "note")</span>
+                <span class="badge @(f.IsDevice || f.IsRename ? "badge-pine" : "badge-gold")">@f.KindLabel</span>
                 <span class="memory-fact">@f.Fact</span>
                 @if (f.Target is not null)
                 {
@@ -62,20 +64,35 @@ else if (Model.UsingFallback)
         @if (Model.Facts.Count == 0)
         {
             <li class="small muted" data-memory-empty>
-                Nothing yet. Say &ldquo;remember that the Pixel is Josh&rsquo;s phone&rdquo; in the chat,
-                or add one below.
+                Nothing yet. Tell me in the chat &mdash; &ldquo;remember that the Pixel is
+                Jason&rsquo;s phone&rdquo;, &ldquo;always order results descending&rdquo;,
+                &ldquo;show ALIEN01 as Living Room PC&rdquo; &mdash; or add one below.
             </li>
         }
     </ul>
 
     <form method="post" asp-page-handler="Remember" asp-route-c="@Model.ConversationId"
-          class="memory-add">
-        <input type="text" name="subject" maxlength="100" required
-               placeholder="What I should call it, e.g. Jason's phone" />
-        <input type="text" name="target" maxlength="255"
-               placeholder="Hostname, IP or MAC (leave blank for a general note)" />
+          class="memory-add" data-memory-add>
+        <select name="kind" data-memory-kind aria-label="What kind of thing to remember">
+            <option value="device">Device alias</option>
+            <option value="preference">Presentation preference</option>
+            <option value="rename">Display rename</option>
+            <option value="note">General note</option>
+        </select>
+        <input type="text" name="subject" maxlength="100" required data-memory-subject />
+        <input type="text" name="target" maxlength="255" data-memory-target />
         <button type="submit" class="btn btn-secondary btn-compact">Remember</button>
     </form>
+
+    <p class="small muted" style="margin:.6rem 0 0">
+        A <strong>preference</strong> is an instruction I follow every time
+        (&ldquo;order descending&rdquo;, &ldquo;chart anything over time&rdquo;,
+        &ldquo;give me 50 rows&rdquo;). A <strong>rename</strong> changes the display
+        only &mdash; <span class="mono">ALIEN01</span>,
+        <span class="mono">ALIEN01.bylotas.net</span> and
+        <span class="mono">alien01.BYLOTAS.NET</span> all show as one label. It never
+        changes the query or the numbers, and rows are never merged.
+    </p>
 </details>
 
 <div class="chat" data-chat data-page-size="@Model.PageSize">

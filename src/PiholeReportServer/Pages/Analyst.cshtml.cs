@@ -203,8 +203,17 @@ public sealed class AnalystModel : PageModel
         // would scan the fact table again.
         if (run.AnswerTable is { } table)
         {
-            turn.Result = table;
-            turn.ResultToken = _results.Store(owner, table, $"Analyst: {question}");
+            // Renames are applied BEFORE caching, so searching for the friendly name
+            // works and CSV export carries it too. Doing it in the browser would mean
+            // the server still held the raw value and a search found nothing.
+            var renamed = DisplayRenamer.Rename(table, DisplayRenamer.RulesFrom(facts));
+            turn.Result = renamed;
+            turn.ResultToken = _results.Store(owner, renamed, $"Analyst: {question}");
+
+            // Resolve the chart against the real columns here rather than trusting the
+            // model's column names in the browser: a chart naming a column that is not
+            // there would render as an empty box with nothing to explain it.
+            turn.Chart = run.Chart?.Resolve(renamed);
         }
 
         convo.Turns.Add(turn);
@@ -248,19 +257,19 @@ public sealed class AnalystModel : PageModel
 
     /// <summary>Adds a fact from the panel, for teaching one without a conversation.</summary>
     public async Task<IActionResult> OnPostRememberAsync(
-        string? subject, string? target, string? note, CancellationToken ct)
+        string? kind, string? subject, string? target, CancellationToken ct)
     {
         if (Owner is { } owner && !string.IsNullOrWhiteSpace(subject))
         {
-            var isDevice = !string.IsNullOrWhiteSpace(target);
+            kind = kind is "device" or "rename" or "preference" ? kind : "note";
+            var fact = kind switch
+            {
+                "device" => $"{subject} is the device {target}",
+                "rename" => $"Show {target} as {subject}",
+                _ => subject!,
+            };
             await _memory.RememberAsync(
-                owner, SavedReportStore.OwnerName(User),
-                isDevice ? "device" : "note",
-                subject!, target,
-                string.IsNullOrWhiteSpace(note)
-                    ? (isDevice ? $"{subject} is the device {target}" : subject!)
-                    : note!,
-                ct);
+                owner, SavedReportStore.OwnerName(User), kind!, subject!, target, fact, ct);
         }
         return RedirectToPage(new { c = ConversationId });
     }
@@ -294,6 +303,14 @@ public sealed class AnalystModel : PageModel
             totalRows = r.Rows.Count,
             truncated = r.Truncated,
             serverPaged = r.Rows.Count > PageSize,
+            chart = turn.Chart is null ? null : new
+            {
+                type = turn.Chart.Type,
+                labelIndex = turn.Chart.LabelIndex,
+                valueIndex = turn.Chart.ValueIndex,
+                labelColumn = turn.Chart.LabelColumn,
+                valueColumn = turn.Chart.ValueColumn,
+            },
         };
     }
 

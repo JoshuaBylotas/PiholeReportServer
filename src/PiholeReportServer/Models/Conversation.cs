@@ -31,6 +31,13 @@ public sealed class ConversationTurn
     /// <summary>Columns of that result, so the table can render before paging.</summary>
     public QueryResult? Result { get; set; }
 
+    /// <summary>
+    /// A chart over <see cref="Result"/>, already checked against its columns. Null
+    /// when the model did not ask for one or the data could not support it — two rows
+    /// is the minimum, and a chart of one row tells nobody anything.
+    /// </summary>
+    public ResolvedChart? Chart { get; set; }
+
     public TimeSpan Elapsed { get; set; }
 
     public string? Model { get; set; }

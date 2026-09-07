@@ -277,6 +277,68 @@ the cap limits what is transferred, not what SQL Server computes.
 
 ---
 
+## The Analyst, and what it remembers
+
+The Analyst is a conversation. Follow-ups carry context, so "which devices hit
+advertising domains" can be followed by "order that descending" or "now just for
+last month" without restating anything. The last **six turns** are replayed and a
+conversation expires after **two hours** idle.
+
+The rows it finds are the answer, shown in full under each reply with the same
+search, paging and export as any other report. The prose above them is an
+introduction, not a substitute — earlier it answered "show me all the youtube
+traffic" with a row count, which is a number nobody can read anything out of.
+
+### Standing memory
+
+Four kinds of thing can be remembered, per user, in `dbo.AnalystMemory`. Say them
+in the chat ("remember that the Pixel is Jason's phone") or add them in the
+**What I remember** panel, which also shows and corrects what is already stored.
+
+| Kind | What it does | Example |
+|------|--------------|---------|
+| `device` | Maps a name you use to a machine the network knows. Becomes a SQL filter. | "Jason's phone" → `Pixel-9-Pro-XL` |
+| `preference` | A standing instruction about presentation, followed every time. | "Always order results descending" |
+| `rename` | A display substitution, output only. | Show `ALIEN01` as "Living Room PC" |
+| `note` | Any other standing fact. | "The guest VLAN is 10.20.9.x" |
+
+A **device** alias is rendered into the prompt *with the SQL clause to use*, because
+the model reliably reuses a filter it is handed and unreliably builds one from
+prose. The clause is chosen from the shape of the target: a MAC becomes
+`dc.mac = …`, an IP `q.client = …`, and a hostname `dc.name LIKE 'name%'`, since
+reverse DNS appends the domain and an equality test on the bare name finds nothing.
+
+A **rename** is applied to the result *after the query runs*:
+
+- It collapses every reverse-DNS spelling of one host — `ALIEN01`,
+  `ALIEN01.bylotas.net`, `alien01.BYLOTAS.NET` — to one label, which is what makes
+  one machine stop reading as three devices.
+- A pattern **with a dot** matches the whole value only. A pattern **without** one
+  also matches the first label of a dotted value, which is the convenience, and
+  will also catch `alien01.example.com` — use the dotted form when that matters.
+- **It never changes the query, the data, or any number**, and it does not merge
+  rows. Two rows now showing the same label stay two rows: collapsing them would be
+  a `GROUP BY`, which would silently change totals. If you want them summed, ask
+  for it — that is a question, not a display setting.
+- It is applied before the result is cached, so searching for the friendly name
+  works and CSV export carries it too.
+
+Every fact is capped at 60 per user, because all of them go into every prompt.
+
+### Charts
+
+The model may ask for a bar, line or pie chart of the table, and a preference like
+"draw a chart whenever the data suits one" makes that the default. Charts are
+inline SVG drawn locally — no charting library and no CDN, since keeping DNS
+history on the network is the point of this server.
+
+The request is checked against the real columns before rendering, so a chart naming
+a column that is not there degrades to "no chart" rather than an empty frame. A
+chart of fewer than two rows is refused, a pie of more than eight slices becomes a
+bar, and a bar is capped at 30 rows — past that a table is the honest presentation.
+For a reloaded conversation the chart is drawn from the rendered table, so a
+server-paged result charts its first page; the caption says how many rows were used.
+
 ## Adding your own report
 
 Two files, no rebuild, no redeploy.

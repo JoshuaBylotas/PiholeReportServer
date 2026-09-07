@@ -31,4 +31,22 @@ public sealed class AnalystFact
     public int UsedCount { get; init; }
 
     public bool IsDevice => Kind == "device";
+
+    /// <summary>A standing instruction about presentation rather than a fact.</summary>
+    public bool IsPreference => Kind == "preference";
+
+    /// <summary>A display substitution, applied to output only.</summary>
+    public bool IsRename => Kind == "rename";
+
+    /// <summary>Whether this kind needs a target value to be useful.</summary>
+    public bool NeedsTarget => Kind is "device" or "rename";
+
+    /// <summary>Short label for the badge on the memory panel.</summary>
+    public string KindLabel => Kind switch
+    {
+        "device" => "device",
+        "preference" => "preference",
+        "rename" => "rename",
+        _ => "note",
+    };
 }

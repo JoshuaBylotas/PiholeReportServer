@@ -116,10 +116,12 @@ public sealed class AiClient
 
         RULES
         - One SELECT statement. Never INSERT, UPDATE, DELETE, DROP, EXEC, MERGE or INTO.
-        - Always bound the result with TOP (n), written IMMEDIATELY after SELECT:
-          "SELECT TOP (10) domain, COUNT_BIG(*) AS n ... GROUP BY domain ORDER BY n DESC".
-          T-SQL has no trailing LIMIT and no trailing TOP; putting TOP after GROUP BY
-          is a syntax error.
+        - TOP goes IMMEDIATELY AFTER SELECT. This is the single most common mistake:
+            RIGHT: SELECT TOP (25) domain, COUNT_BIG(*) AS n FROM ... GROUP BY domain ORDER BY n DESC
+            WRONG: SELECT domain, COUNT_BIG(*) AS n FROM ... GROUP BY domain ORDER BY n DESC TOP (25)
+            WRONG: SELECT domain, COUNT_BIG(*) AS n FROM ... GROUP BY domain LIMIT 25
+          T-SQL has no LIMIT and no trailing TOP. If a row count was requested, put it
+          in the TOP after SELECT - never append it.
         - A ranked list needs ORDER BY, and TOP without ORDER BY returns an arbitrary
           n rows. Always order a "top N" by the count, descending.
         - ts is UTC: use DATEADD(day, -n, SYSUTCDATETIME()) for relative ranges.

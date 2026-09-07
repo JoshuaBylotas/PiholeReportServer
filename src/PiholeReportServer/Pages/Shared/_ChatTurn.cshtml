@@ -54,6 +54,19 @@
 
             @* The rows are the point for anything phrased as "show me", so they sit
                under the answer rather than behind a disclosure triangle. *@
+            @if (Model.Chart is not null && Model.Result is not null)
+            {
+                @* Rendered by chart.js from the data attributes, so a reloaded
+                   conversation looks the same as a live one. *@
+                <div data-chart
+                     data-chart-spec="@System.Text.Json.JsonSerializer.Serialize(new {
+                         type = Model.Chart.Type,
+                         labelIndex = Model.Chart.LabelIndex,
+                         valueIndex = Model.Chart.ValueIndex,
+                         labelColumn = Model.Chart.LabelColumn,
+                         valueColumn = Model.Chart.ValueColumn })"></div>
+            }
+
             @if (Model.Result is not null && Model.Result.Rows.Count > 0)
             {
                 <div class="chat-table">

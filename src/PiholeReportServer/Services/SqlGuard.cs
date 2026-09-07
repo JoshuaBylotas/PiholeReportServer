@@ -115,6 +115,25 @@ public static partial class SqlGuard
             }
         }
 
+        // TOP written at the END of the query. T-SQL has no trailing LIMIT and no
+        // trailing TOP, so this is a syntax error - but SQL Server's message ("Incorrect
+        // syntax near 'TOP'") does not say where it should go, and the model then tries
+        // several equally wrong placements. Catching it here spends the same round trip
+        // but returns an instruction precise enough to fix in one.
+        //
+        // Matched conservatively: only a TOP that appears after an ORDER BY or GROUP BY,
+        // which cannot be legitimate. A TOP inside a subquery after its own ORDER BY is
+        // not valid T-SQL either, so there is no false positive to worry about.
+        if (Regex.IsMatch(withoutTrailing,
+                @"\b(?:ORDER|GROUP)\s+BY\b.*\bTOP\b",
+                RegexOptions.IgnoreCase | RegexOptions.Singleline))
+        {
+            return SqlGuardResult.Deny(
+                "TOP must come immediately after SELECT, not at the end of the query. " +
+                "Write 'SELECT TOP (25) col, COUNT_BIG(*) AS n ... GROUP BY col ORDER BY n DESC'. " +
+                "T-SQL has no trailing TOP and no LIMIT clause.");
+        }
+
         // Extended and system stored procedures.
         if (Regex.IsMatch(withoutTrailing, @"\b(?:xp_|sp_|fn_trace)", RegexOptions.IgnoreCase))
         {

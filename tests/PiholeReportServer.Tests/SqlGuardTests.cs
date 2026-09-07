@@ -110,4 +110,42 @@ public class SqlGuardTests
         Assert.Contains("SELECT", scrubbed);
         Assert.Contains("FROM", scrubbed);
     }
+
+    [Theory]
+    // The model appends TOP when a row-count preference is in play, and T-SQL has no
+    // trailing TOP. SQL Server's own message does not say where it belongs, so it
+    // tries several equally wrong placements; the guard's message says exactly.
+    [InlineData("SELECT domain, COUNT_BIG(*) AS n FROM dbo.PiholeQueries GROUP BY domain ORDER BY n DESC TOP (25)")]
+    [InlineData("SELECT domain FROM dbo.PiholeQueries ORDER BY domain TOP 10")]
+    [InlineData("SELECT domain, COUNT_BIG(*) n FROM dbo.PiholeQueries GROUP BY domain TOP (5)")]
+    public void A_TOP_written_at_the_end_is_refused_with_the_correct_placement(string sql)
+    {
+        var verdict = SqlGuard.Validate(sql);
+
+        Assert.False(verdict.Allowed);
+        Assert.Contains("immediately after SELECT", verdict.Reason);
+    }
+
+    [Theory]
+    // Correct placement must still pass, including without parentheses and with
+    // DISTINCT between SELECT and TOP.
+    [InlineData("SELECT TOP (25) domain, COUNT_BIG(*) AS n FROM dbo.PiholeQueries GROUP BY domain ORDER BY n DESC")]
+    [InlineData("SELECT TOP 25 domain FROM dbo.PiholeQueries ORDER BY domain")]
+    [InlineData("SELECT DISTINCT TOP (10) domain FROM dbo.PiholeQueries ORDER BY domain")]
+    [InlineData("WITH v AS (SELECT TOP (10) domain FROM dbo.PiholeQueries ORDER BY domain) SELECT * FROM v")]
+    public void A_correctly_placed_TOP_is_allowed(string sql)
+    {
+        Assert.True(SqlGuard.Validate(sql).Allowed, SqlGuard.Validate(sql).Reason);
+    }
+
+    [Fact]
+    public void The_word_TOP_inside_a_string_literal_does_not_trip_the_check()
+    {
+        // Literals are scrubbed before the check, so a domain containing "top" after
+        // an ORDER BY must not be refused.
+        var verdict = SqlGuard.Validate(
+            "SELECT TOP (10) domain FROM dbo.PiholeQueries ORDER BY CASE WHEN domain = 'desktop.example.com' THEN 0 ELSE 1 END");
+
+        Assert.True(verdict.Allowed, verdict.Reason);
+    }
 }

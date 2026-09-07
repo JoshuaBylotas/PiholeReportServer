@@ -96,6 +96,13 @@ public sealed class AgentRun
     public AgentMemoryRequest? MemoryRequest { get; set; }
 
     /// <summary>
+    /// A chart the model asked for over <see cref="AnswerTable"/>. Validated against
+    /// the actual columns before it reaches the browser, because a chart naming a
+    /// column that is not there would render as an empty box with no explanation.
+    /// </summary>
+    public ChartRequest? Chart { get; set; }
+
+    /// <summary>
     /// The rows to show under the answer: the last query that actually returned any.
     /// <para>
     /// This is the point of the page for anything phrased as "show me" or "list" —
@@ -127,3 +134,110 @@ public sealed class AgentMemoryRequest
 
     public string? Fact { get; init; }
 }
+
+/// <summary>
+/// A chart the model asked for over the answer table.
+/// <para>
+/// <see cref="Label"/> and <see cref="Value"/> are column names from the query, not
+/// indexes: the model reliably names a column it just selected and unreliably counts
+/// positions. <see cref="Resolve"/> turns them into indexes and rejects anything that
+/// does not fit, so a bad request degrades to "no chart" rather than a blank panel.
+/// </para>
+/// </summary>
+public sealed class ChartRequest
+{
+    public string? Type { get; set; }
+
+    public string? Label { get; set; }
+
+    public string? Value { get; set; }
+
+    private static readonly string[] Numeric =
+        ["Int32", "Int64", "Int16", "Byte", "Decimal", "Double", "Single"];
+
+    /// <summary>Chart types the browser can draw. Anything else falls back to a bar.</summary>
+    public string NormalisedType => Type?.Trim().ToLowerInvariant() switch
+    {
+        "line" => "line",
+        "pie" => "pie",
+        _ => "bar",
+    };
+
+    /// <summary>
+    /// Resolves the named columns against a result, or returns null when the request
+    /// cannot be honoured. A pie of 40 slices and a chart of a single row are both
+    /// refused: they are noise, not information.
+    /// </summary>
+    public ResolvedChart? Resolve(QueryResult result)
+    {
+        if (result.Rows.Count < 2)
+        {
+            return null;
+        }
+
+        var labelIndex = IndexOf(result, Label);
+        var valueIndex = IndexOf(result, Value);
+
+        // Fall back to the obvious pair rather than giving up: the first text column
+        // and the first numeric one is what almost every one of these queries returns.
+        if (labelIndex < 0)
+        {
+            labelIndex = FirstMatching(result, numeric: false);
+        }
+        if (valueIndex < 0)
+        {
+            valueIndex = FirstMatching(result, numeric: true);
+        }
+        if (labelIndex < 0 || valueIndex < 0 || labelIndex == valueIndex)
+        {
+            return null;
+        }
+        if (!Numeric.Contains(result.Columns[valueIndex].ClrType))
+        {
+            return null;
+        }
+
+        var type = NormalisedType;
+        // A pie needs to be readable; past a handful of slices a bar is honest and a
+        // pie is decoration.
+        if (type == "pie" && result.Rows.Count > 8)
+        {
+            type = "bar";
+        }
+
+        return new ResolvedChart(type, labelIndex, valueIndex,
+            result.Columns[labelIndex].Name, result.Columns[valueIndex].Name);
+    }
+
+    private static int IndexOf(QueryResult result, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return -1;
+        }
+        for (var i = 0; i < result.Columns.Count; i++)
+        {
+            if (string.Equals(result.Columns[i].Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static int FirstMatching(QueryResult result, bool numeric)
+    {
+        for (var i = 0; i < result.Columns.Count; i++)
+        {
+            if (Numeric.Contains(result.Columns[i].ClrType) == numeric)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+}
+
+/// <summary>A chart request checked against a real result and safe to render.</summary>
+public sealed record ResolvedChart(
+    string Type, int LabelIndex, int ValueIndex, string LabelColumn, string ValueColumn);
