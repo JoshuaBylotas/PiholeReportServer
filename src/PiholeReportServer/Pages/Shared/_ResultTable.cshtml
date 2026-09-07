@@ -1,5 +1,6 @@
-@model PiholeReportServer.Models.QueryResult
+@model PiholeReportServer.Models.ResultTableViewModel
 @{
+    var result = Model.Result;
     var numeric = new HashSet<string>
     {
         "Int32", "Int64", "Int16", "Byte", "Decimal", "Double", "Single"
@@ -7,33 +8,38 @@
 }
 
 <div class="result-meta">
-    <span><strong>@Model.Rows.Count.ToString("N0")</strong> row@(Model.Rows.Count == 1 ? "" : "s")</span>
-    <span>@Model.Columns.Count column@(Model.Columns.Count == 1 ? "" : "s")</span>
-    <span>@Model.Elapsed.TotalMilliseconds.ToString("N0") ms</span>
-    @if (Model.Truncated)
+    <span><strong>@result.Rows.Count.ToString("N0")</strong> row@(result.Rows.Count == 1 ? "" : "s")</span>
+    <span>@result.Columns.Count column@(result.Columns.Count == 1 ? "" : "s")</span>
+    <span>@result.Elapsed.TotalMilliseconds.ToString("N0") ms</span>
+    @if (result.Truncated)
     {
-        <span class="badge badge-gold">Truncated at @Model.RowCap.ToString("N0")</span>
+        <span class="badge badge-gold">Capped at @result.RowCap.ToString("N0")</span>
     }
 </div>
 
-@if (Model.Truncated)
+@if (result.Truncated)
 {
     <div class="notice notice-warn">
-        <strong>Showing the first @Model.RowCap.ToString("N0") rows.</strong>
-        The result set is larger. Narrow the date range or add a filter, or export to CSV
-        for the complete result &mdash; searching below only filters the rows already fetched.
+        <strong>The query hit the @result.RowCap.ToString("N0")-row cap.</strong>
+        Totals reflect only the rows fetched. Narrow the range or add a filter for exact
+        figures, or export to CSV, which has its own higher limit.
     </div>
 }
 
-@if (Model.Rows.Count == 0)
+@if (result.Rows.Count == 0)
 {
     <div class="notice notice-info">No rows matched.</div>
 }
 else
 {
-    <div data-result-root>
-        @* Hidden until the script takes over, so with JavaScript off the page still
-           shows the whole table rather than controls that do nothing. *@
+    <div data-result-root
+         data-result-token="@Model.Token"
+         data-result-pagesize="@Model.PageSize"
+         data-result-total="@result.Rows.Count"
+         data-result-serverpaged="@(Model.ServerPaged ? "1" : "0")">
+
+        @* Hidden until the script initialises, so with JavaScript off the first page
+           still renders rather than showing controls that do nothing. *@
         <div class="result-toolbar" data-result-toolbar hidden>
             <div class="result-search">
                 <label class="visually-hidden" for="resultSearch">Search results</label>
@@ -46,17 +52,6 @@ else
 
             <span class="spacer"></span>
 
-            <label class="small muted nowrap">
-                Rows per page
-                <select data-result-pagesize class="pagesize">
-                    <option value="50">50</option>
-                    <option value="100" selected>100</option>
-                    <option value="250">250</option>
-                    <option value="500">500</option>
-                    <option value="all">All</option>
-                </select>
-            </label>
-
             <div class="pager">
                 <button type="button" class="btn btn-secondary btn-compact"
                         data-result-prev aria-label="Previous page">&#8592;&nbsp;Prev</button>
@@ -66,26 +61,30 @@ else
         </div>
 
         <div class="notice notice-info" data-result-empty hidden>
-            No rows match that search. Space-separated terms must all appear in the row.
+            No rows match that search.
+        </div>
+
+        <div class="notice notice-warn" data-result-expired hidden>
+            <strong>That result has expired.</strong> Run the query again to page through it.
         </div>
 
         <div class="table-wrap">
             <table class="data">
                 <thead>
                     <tr>
-                        @foreach (var c in Model.Columns)
+                        @foreach (var c in result.Columns)
                         {
                             <th class="@(numeric.Contains(c.ClrType) ? "num" : "")" scope="col">@c.Name</th>
                         }
                     </tr>
                 </thead>
-                <tbody>
-                    @foreach (var row in Model.Rows)
+                <tbody data-result-body>
+                    @foreach (var row in Model.VisibleRows)
                     {
                         <tr>
                             @for (var i = 0; i < row.Length; i++)
                             {
-                                var col = Model.Columns[i];
+                                var col = result.Columns[i];
                                 var isNum = numeric.Contains(col.ClrType);
                                 @if (row[i] is null)
                                 {
@@ -109,5 +108,15 @@ else
                 </tbody>
             </table>
         </div>
+
+        @if (Model.ServerPaged)
+        {
+            <p class="small muted" style="margin-top:.6rem">
+                Showing page 1 of @Model.PageCount.ToString("N0").
+                Only @Model.PageSize rows are sent at a time; searching and paging query
+                the cached result on the server, so the full
+                @result.Rows.Count.ToString("N0") rows never have to reach the browser.
+            </p>
+        }
     </div>
 }

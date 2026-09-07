@@ -86,6 +86,9 @@ builder.Services.AddRazorPages(options =>
 builder.Services.AddScoped<ISqlConnectionFactory, SqlConnectionFactory>();
 builder.Services.AddScoped<ReportRunner>();
 builder.Services.AddSingleton<ReportCatalog>();
+// Singleton: it holds materialised result sets across requests, with its own
+// size-limited MemoryCache so large results cannot exhaust the worker.
+builder.Services.AddSingleton<ResultCache>();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ClientDirectory>();
 builder.Services.AddScoped<AdlistDirectory>();

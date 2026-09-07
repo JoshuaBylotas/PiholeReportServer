@@ -219,7 +219,7 @@
 
 @if (Model.Result is not null)
 {
-    <partial name="Shared/_ResultTable" model="Model.Result" />
+    <partial name="Shared/_ResultTable" model="ResultTableViewModel.For(Model.Result, Model.ResultToken, Model.PageSize)" />
 }
 
 @if (Model.GeneratedSql is not null)

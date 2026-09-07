@@ -19,6 +19,7 @@ public sealed class SqlModel : PageModel
     private readonly ReportRunner _runner;
     private readonly SavedReportStore _saved;
     private readonly AiClient _ai;
+    private readonly ResultCache _cache;
     private readonly ReportingOptions _reporting;
     private readonly ILogger<SqlModel> _log;
 
@@ -26,12 +27,14 @@ public sealed class SqlModel : PageModel
         ReportRunner runner,
         SavedReportStore saved,
         AiClient ai,
+        ResultCache cache,
         IOptions<ReportingOptions> reporting,
         ILogger<SqlModel> log)
     {
         _runner = runner;
         _saved = saved;
         _ai = ai;
+        _cache = cache;
         _reporting = reporting.Value;
         _log = log;
     }
@@ -55,6 +58,10 @@ public sealed class SqlModel : PageModel
     private string? Owner => SavedReportStore.OwnerOid(User);
 
     public QueryResult? Result { get; private set; }
+
+    public string? ResultToken { get; private set; }
+
+    public int PageSize => _cache.PageSize;
 
     public string? ErrorMessage { get; private set; }
 
@@ -211,6 +218,10 @@ public sealed class SqlModel : PageModel
         {
             _log.LogInformation("SQL console executing for {User}.", User.Identity?.Name);
             Result = await _runner.RunAsync(Sql!, new Dictionary<string, object?>(), ct: ct);
+            if (SavedReportStore.OwnerOid(User) is { } owner)
+            {
+                ResultToken = _cache.Store(owner, Result, "ad-hoc SQL");
+            }
         }
         catch (Exception ex)
         {

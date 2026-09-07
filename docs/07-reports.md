@@ -155,7 +155,35 @@ never inflates counts.
 Every result — pre-canned report, builder or SQL console — renders through the same
 component, so these behave identically everywhere.
 
-### Search
+### Search and paging
+
+The row cap is **100,000**, and **100 rows** reach the browser at a time.
+
+That combination needs the result to live somewhere between the query and the page,
+so it does: a completed result is held in a size-limited server-side cache and the
+browser asks for one page at a time. Searching queries the cached rows on the
+server too.
+
+Both alternatives were rejected for concrete reasons. Rendering 100,000 rows into
+the DOM is roughly 100 MB of markup and seconds of browser freeze. Paging by
+re-running the query would scan tens of millions of rows to fetch the next hundred.
+
+| | |
+|---|---|
+| Cache lifetime | 20 minutes, sliding |
+| Cache bound | 600,000 rows total across all users, least-recently-used eviction |
+| Ownership | checked on every page read, so a leaked token is useless to anyone else |
+| Expiry | the page says the result expired and to re-run, rather than failing oddly |
+
+Space-separated search terms must *all* appear in the row, so a second word narrows.
+Escape clears it. Rows are indexed with a separator between cells, so a search can
+never match across a column boundary — `abcdef` will not match a row holding `abc`
+and `def` in adjacent columns.
+
+An agent trace is the exception: those per-step samples are small and transient, so
+they render in full with client-side filtering and no cache entry.
+
+### Search (older behaviour, superseded)
 
 A search box above the table filters the rows **already fetched**. Space-separated terms
 must *all* appear somewhere in the row, so `samsung advert` narrows rather than widening.

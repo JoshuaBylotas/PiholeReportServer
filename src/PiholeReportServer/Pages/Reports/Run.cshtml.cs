@@ -12,6 +12,7 @@ public sealed class RunModel : PageModel
     private readonly ReportCatalog _catalog;
     private readonly ReportRunner _runner;
     private readonly AiClient _ai;
+    private readonly ResultCache _cache;
     private readonly ReportingOptions _reporting;
     private readonly ILogger<RunModel> _log;
 
@@ -19,12 +20,14 @@ public sealed class RunModel : PageModel
         ReportCatalog catalog,
         ReportRunner runner,
         AiClient ai,
+        ResultCache cache,
         IOptions<ReportingOptions> reporting,
         ILogger<RunModel> log)
     {
         _catalog = catalog;
         _runner = runner;
         _ai = ai;
+        _cache = cache;
         _reporting = reporting.Value;
         _log = log;
     }
@@ -42,6 +45,10 @@ public sealed class RunModel : PageModel
     public string? ErrorMessage { get; private set; }
 
     public bool HasRun { get; private set; }
+
+    public string? ResultToken { get; private set; }
+
+    public int PageSize => _cache.PageSize;
 
     public AiPanelViewModel AiPanel => AiPanelViewModel.For(
         _ai.Enabled, _ai.Model, User.IsInRole(AppRoles.SqlAuthor), Result,
@@ -137,6 +144,10 @@ public sealed class RunModel : PageModel
         try
         {
             Result = await _runner.RunReportAsync(Report!, Values, ct: ct);
+            if (SavedReportStore.OwnerOid(User) is { } owner)
+            {
+                ResultToken = _cache.Store(owner, Result, Report!.Title);
+            }
         }
         catch (ArgumentException ex)
         {

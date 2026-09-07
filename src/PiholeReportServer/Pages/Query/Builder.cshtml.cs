@@ -27,6 +27,7 @@ public sealed class BuilderModel : PageModel
     private readonly AdlistDirectory _adlists;
     private readonly SavedReportStore _saved;
     private readonly AiClient _ai;
+    private readonly ResultCache _cache;
     private readonly ReportingOptions _reporting;
     private readonly ILogger<BuilderModel> _log;
 
@@ -36,6 +37,7 @@ public sealed class BuilderModel : PageModel
         AdlistDirectory adlists,
         SavedReportStore saved,
         AiClient ai,
+        ResultCache cache,
         IOptions<ReportingOptions> reporting,
         ILogger<BuilderModel> log)
     {
@@ -44,6 +46,7 @@ public sealed class BuilderModel : PageModel
         _adlists = adlists;
         _saved = saved;
         _ai = ai;
+        _cache = cache;
         _reporting = reporting.Value;
         _log = log;
     }
@@ -58,6 +61,11 @@ public sealed class BuilderModel : PageModel
     public int? SavedId { get; set; }
 
     public QueryResult? Result { get; private set; }
+
+    /// <summary>Token for paging the cached result server-side.</summary>
+    public string? ResultToken { get; private set; }
+
+    public int PageSize => _cache.PageSize;
 
     public string? GeneratedSql { get; private set; }
 
@@ -249,6 +257,10 @@ public sealed class BuilderModel : PageModel
             var composed = BuilderSqlComposer.Compose(Spec, _reporting.MaxRows);
             GeneratedSql = composed.Sql;
             Result = await _runner.RunAsync(composed.Sql, composed.Parameters, ct: ct);
+            if (SavedReportStore.OwnerOid(User) is { } owner)
+            {
+                ResultToken = _cache.Store(owner, Result, $"builder / {Spec.GroupBy}");
+            }
         }
         catch (Exception ex)
         {

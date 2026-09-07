@@ -5,12 +5,7 @@
    working with no CDN and no build step:
 
      1. A busy overlay that blocks interaction while a query runs.
-     2. Client-side search and paging over an already-rendered result table.
-
-   Search and paging are client-side on purpose. The rows are already
-   materialised and row-capped by the server, so filtering in the browser is
-   instant and costs nothing; paging server-side would mean re-running an
-   expensive aggregate query for every page turn.
+   Result search and paging live in result-table.js.
    ========================================================================= */
 (function () {
     "use strict";
@@ -124,156 +119,12 @@
         window.addEventListener("pagehide", hideBusy);
     }
 
-    /* -- 2. Result search + paging ----------------------------------------- */
-
-    function initResultTable(root) {
-        var table = root.querySelector("table.data");
-        if (!table) {
-            return;
-        }
-        var tbody = table.tBodies[0];
-        if (!tbody) {
-            return;
-        }
-
-        var rows = Array.prototype.slice.call(tbody.rows);
-        if (rows.length === 0) {
-            return;
-        }
-
-        // Cache each row's searchable text once. Recomputing textContent on every
-        // keystroke is what makes naive table filters crawl on a few thousand rows.
-        var haystacks = rows.map(function (r) {
-            return (r.textContent || "").toLowerCase();
-        });
-
-        var searchInput = root.querySelector("[data-result-search]");
-        var pageSizeSelect = root.querySelector("[data-result-pagesize]");
-        var prevBtn = root.querySelector("[data-result-prev]");
-        var nextBtn = root.querySelector("[data-result-next]");
-        var status = root.querySelector("[data-result-status]");
-        var empty = root.querySelector("[data-result-empty]");
-
-        var matching = rows.slice();
-        var page = 0;
-
-        function pageSize() {
-            var v = pageSizeSelect ? pageSizeSelect.value : "100";
-            return v === "all" ? Number.MAX_SAFE_INTEGER : parseInt(v, 10) || 100;
-        }
-
-        function render() {
-            var size = pageSize();
-            var pages = Math.max(1, Math.ceil(matching.length / size));
-            if (page >= pages) {
-                page = pages - 1;
-            }
-            if (page < 0) {
-                page = 0;
-            }
-
-            var start = page * size;
-            var end = Math.min(start + size, matching.length);
-
-            // Hide everything, then reveal just this page's slice.
-            for (var i = 0; i < rows.length; i++) {
-                rows[i].hidden = true;
-            }
-            for (var j = start; j < end; j++) {
-                matching[j].hidden = false;
-            }
-
-            if (status) {
-                if (matching.length === 0) {
-                    status.textContent = "No rows match";
-                } else {
-                    var shown = "Showing " + (start + 1).toLocaleString() + "–" +
-                        end.toLocaleString() + " of " + matching.length.toLocaleString();
-                    status.textContent = matching.length !== rows.length
-                        ? shown + " (filtered from " + rows.length.toLocaleString() + ")"
-                        : shown;
-                }
-            }
-            if (empty) {
-                empty.hidden = matching.length !== 0;
-            }
-            if (prevBtn) {
-                prevBtn.disabled = page === 0 || matching.length === 0;
-            }
-            if (nextBtn) {
-                nextBtn.disabled = page >= pages - 1 || matching.length === 0;
-            }
-        }
-
-        function applyFilter() {
-            var term = (searchInput ? searchInput.value : "").trim().toLowerCase();
-            if (term === "") {
-                matching = rows.slice();
-            } else {
-                // Space-separated terms must all be present, which makes
-                // "samsung block" a useful narrowing rather than a literal.
-                var terms = term.split(/\s+/);
-                matching = rows.filter(function (_, i) {
-                    var hay = haystacks[i];
-                    for (var t = 0; t < terms.length; t++) {
-                        if (hay.indexOf(terms[t]) === -1) {
-                            return false;
-                        }
-                    }
-                    return true;
-                });
-            }
-            page = 0;
-            render();
-        }
-
-        if (searchInput) {
-            var debounce = null;
-            searchInput.addEventListener("input", function () {
-                window.clearTimeout(debounce);
-                debounce = window.setTimeout(applyFilter, 120);
-            });
-            searchInput.addEventListener("keydown", function (e) {
-                if (e.key === "Escape") {
-                    searchInput.value = "";
-                    applyFilter();
-                }
-            });
-        }
-        if (pageSizeSelect) {
-            pageSizeSelect.addEventListener("change", function () {
-                page = 0;
-                render();
-            });
-        }
-        if (prevBtn) {
-            prevBtn.addEventListener("click", function () {
-                page--;
-                render();
-                root.scrollIntoView({ block: "nearest" });
-            });
-        }
-        if (nextBtn) {
-            nextBtn.addEventListener("click", function () {
-                page++;
-                render();
-                root.scrollIntoView({ block: "nearest" });
-            });
-        }
-
-        // Reveal the controls only once JS has taken over, so a no-JS page shows
-        // the full table rather than dead widgets.
-        var toolbar = root.querySelector("[data-result-toolbar]");
-        if (toolbar) {
-            toolbar.hidden = false;
-        }
-
-        render();
-    }
+    /* Result search and paging now live in result-table.js, which supports both
+       the server-paged and inline cases. Keeping a second implementation here
+       would mean two sets of controls fighting over the same elements. */
 
     function init() {
         wireBusy();
-        document.querySelectorAll("[data-result-root]").forEach(initResultTable);
     }
 
     if (document.readyState === "loading") {
