@@ -28,11 +28,38 @@ public class AnalystMemoryTests
     };
 
     [Fact]
-    public void No_facts_renders_nothing_at_all()
+    public void No_facts_renders_no_fact_list()
     {
+        var text = AnalystMemoryStore.Render([]);
+
         // An empty section would still cost prompt tokens and invite the model to
         // invent entries to fill it.
-        Assert.Equal("", AnalystMemoryStore.Render([]));
+        Assert.DoesNotContain("WHAT YOU HAVE BEEN TOLD", text);
+        Assert.DoesNotContain("Devices:", text);
+        Assert.DoesNotContain("Other facts:", text);
+    }
+
+    [Fact]
+    public void How_to_remember_is_present_even_with_nothing_remembered()
+    {
+        // This lived inside the empty-facts early return, so a model with nothing
+        // remembered was never told it could remember. The first fact could then only
+        // be taught through the panel - at exactly the moment someone is most likely
+        // to try telling it in conversation instead.
+        var text = AnalystMemoryStore.Render([]);
+
+        Assert.Contains("\"action\":\"remember\"", text);
+        Assert.Contains("\"action\":\"forget\"", text);
+    }
+
+    [Fact]
+    public void How_to_remember_survives_alongside_existing_facts()
+    {
+        var text = AnalystMemoryStore.Render([Device("Jason's phone", "Pixel-9-Pro-XL")]);
+
+        Assert.Contains("WHAT YOU HAVE BEEN TOLD", text);
+        Assert.Contains("\"action\":\"remember\"", text);
+        Assert.Contains("\"action\":\"forget\"", text);
     }
 
     [Fact]

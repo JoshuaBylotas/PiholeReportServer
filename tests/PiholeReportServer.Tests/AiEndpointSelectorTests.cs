@@ -203,4 +203,32 @@ public class AiEndpointSelectorTests
         Assert.Equal($"{Fast}/api/generate", sel.Primary.Uri("api/generate").ToString());
         Assert.Equal($"{Fast}/api/tags", sel.Primary.Uri("api/tags").ToString());
     }
+
+    [Theory]
+    [InlineData("")]                       // the shipped default in appsettings.json
+    [InlineData("   ")]
+    [InlineData("10.20.0.139:11434")]      // the scheme left off
+    public void An_unusable_endpoint_is_constructible_and_only_fails_when_called(string endpoint)
+    {
+        // This is a singleton resolved during startup logging, so throwing in the
+        // constructor took the whole application down - and it did so for the most
+        // ordinary configuration there is, the AI features simply left switched off.
+        var (sel, _) = Build(endpoint: endpoint, fallback: "");
+
+        Assert.False(sel.Primary.IsConfigured);
+
+        // And when something does try to call it, the message says what to set rather
+        // than surfacing a bare UriFormatException.
+        var ex = Assert.Throws<InvalidOperationException>(() => sel.Primary.Uri("api/tags"));
+        Assert.Contains("endpoint", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("http://", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void A_usable_endpoint_is_reported_as_configured()
+    {
+        var (sel, _) = Build();
+        Assert.True(sel.Primary.IsConfigured);
+        Assert.True(sel.Fallback!.IsConfigured);
+    }
 }

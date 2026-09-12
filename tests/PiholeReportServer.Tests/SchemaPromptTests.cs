@@ -77,4 +77,20 @@ public class SchemaPromptTests
             Assert.Contains(verb, Schema);
         }
     }
+
+    [Fact]
+    public void Says_nothing_about_what_shape_a_reply_takes()
+    {
+        // This constant is spliced into two prompts with DIFFERENT reply contracts.
+        // It carried the one-shot path's contract - Reply ONLY with JSON {"sql",
+        // "notes"} - and the agent inherited it, so the agent's prompt asked for
+        // {"action":…} first and then, later and more emphatically, for {"sql"}.
+        // The model obeyed the second: it never emitted action:"answer", spent its
+        // whole step budget querying, and every question ended with no answer and a
+        // list of SQL. The schema describes the DATA; each caller states its own
+        // contract.
+        Assert.DoesNotContain("Reply ONLY", Schema, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"notes\"", Schema);
+        Assert.DoesNotContain("Reply with", Schema, StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -11,7 +11,16 @@ public sealed record AiTarget
         Endpoint = endpoint.TrimEnd('/');
         Model = model;
         IsFallback = isFallback;
-        BaseUri = new Uri(Endpoint + "/");
+
+        // Parsed rather than assumed. An unset Ai:Endpoint is the SHIPPED DEFAULT,
+        // and building the absolute base eagerly threw UriFormatException on "/" —
+        // from a singleton constructor resolved during startup logging, so the whole
+        // application failed to start whenever the AI features were simply left off.
+        // A target with no address is a legitimate state; it just cannot be called.
+        // Fully qualified: the instance method Uri(string) below shadows the type here.
+        BaseUri = System.Uri.TryCreate(Endpoint + "/", UriKind.Absolute, out var baseUri)
+            ? baseUri
+            : null;
     }
 
     public string Endpoint { get; }
@@ -20,7 +29,10 @@ public sealed record AiTarget
     /// <summary>True for the standby host, so callers can say which one answered.</summary>
     public bool IsFallback { get; }
 
-    private Uri BaseUri { get; }
+    private Uri? BaseUri { get; }
+
+    /// <summary>True when this target has a usable address to call.</summary>
+    public bool IsConfigured => BaseUri is not null;
 
     /// <summary>
     /// Absolute URI for a relative API path. The client cannot use
@@ -28,7 +40,14 @@ public sealed record AiTarget
     /// decided per request, and BaseAddress is shared mutable state on a client that
     /// the factory pools across requests.
     /// </summary>
-    public Uri Uri(string path) => new(BaseUri, path);
+    public Uri Uri(string path) => BaseUri is { } baseUri
+        ? new System.Uri(baseUri, path)
+        : throw new InvalidOperationException(
+            string.IsNullOrWhiteSpace(Endpoint)
+                ? "No inference endpoint is configured. Set Ai:Endpoint to an absolute " +
+                  "address such as http://10.20.0.139:11434."
+                : $"'{Endpoint}' is not a usable inference endpoint. It must be absolute, " +
+                  "including the scheme, e.g. http://10.20.0.139:11434.");
 
     public override string ToString() => $"{Endpoint} ({Model})";
 }

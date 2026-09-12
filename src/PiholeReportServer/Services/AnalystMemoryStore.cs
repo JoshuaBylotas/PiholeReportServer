@@ -241,15 +241,25 @@ public sealed class AnalystMemoryStore
     /// Renders the facts for the system prompt. Device aliases come first and carry
     /// the filter to use, because those are the ones that decide whether a question
     /// can be answered at all rather than merely answered with more context.
+    /// <para>
+    /// The list of facts is omitted when there are none — an empty "Devices:" heading
+    /// costs tokens and invites the model to fill it. The instructions for HOW to
+    /// remember are not omitted, and used to be: they lived inside this method's
+    /// early return, so a model with nothing remembered was never told it could
+    /// remember anything. The first fact could only ever be taught through the panel,
+    /// which is the one moment someone is most likely to try telling it instead.
+    /// </para>
     /// </summary>
     public static string Render(IReadOnlyList<AnalystFact> facts)
     {
+        var sb = new StringBuilder();
+
         if (facts.Count == 0)
         {
-            return "";
+            AppendHowToRemember(sb);
+            return sb.ToString();
         }
 
-        var sb = new StringBuilder();
         sb.AppendLine("WHAT YOU HAVE BEEN TOLD BY THE OWNER");
         sb.AppendLine("Standing facts and instructions. Treat the facts as true and follow the");
         sb.AppendLine("instructions without being reminded of them.");
@@ -308,6 +318,16 @@ public sealed class AnalystMemoryStore
         }
 
         sb.AppendLine();
+        AppendHowToRemember(sb);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// How to be taught a standing fact, and how to be told to drop one. Always in the
+    /// prompt, with or without facts — see <see cref="Render"/>.
+    /// </summary>
+    private static void AppendHowToRemember(StringBuilder sb)
+    {
         // The worked example uses a deliberately fictional device. An example naming a
         // real one reads as a competing fact, and the model then has to choose between
         // the illustration and the truth.
@@ -325,7 +345,11 @@ public sealed class AnalystMemoryStore
         sb.AppendLine("Only remember when they are TELLING you something to keep, not when they");
         sb.AppendLine("ask a question. \"Show me X\" is a question; \"always show me X\" is a");
         sb.AppendLine("preference worth remembering.");
-        return sb.ToString();
+        // Documented alongside remember because the pair is what makes a wrong fact
+        // correctable in conversation; without it the only route is the panel.
+        sb.AppendLine("To be told to drop one, reply with:");
+        sb.AppendLine("  {\"action\":\"forget\",\"subject\":\"the spare laptop\",");
+        sb.AppendLine("   \"answer\":\"Forgotten.\"}");
     }
 
     /// <summary>

@@ -13,6 +13,69 @@ public sealed record AiSqlSuggestion(string Sql, string? Notes);
 public sealed record AiChatMessage(string Role, string Content);
 
 /// <summary>
+/// One inference host as a health probe found it. Carries what was asked for as
+/// well as what was found, because "unreachable" is unactionable without the
+/// address, and "model missing" is unactionable without the name.
+/// </summary>
+public sealed record AiHostHealth
+{
+    /// <summary>"Preferred" or "Standby", matching how the selector chooses.</summary>
+    public required string Role { get; init; }
+
+    public required string Endpoint { get; init; }
+
+    /// <summary>The model this host is asked for, which differs between the two.</summary>
+    public required string Model { get; init; }
+
+    /// <summary>
+    /// False when the address itself is unusable - empty, or missing its scheme.
+    /// Separated from <see cref="Reachable"/> because "nothing to call" and "called
+    /// it and got nothing" send you to different places to fix it.
+    /// </summary>
+    public bool Configured { get; init; } = true;
+
+    public bool Reachable { get; init; }
+
+    public bool ModelInstalled { get; init; }
+
+    /// <summary>Everything the host has pulled, so a typo in the tag is visible.</summary>
+    public IReadOnlyList<string> InstalledModels { get; init; } = [];
+
+    /// <summary>What is wrong, phrased as something to do about it. Null when healthy.</summary>
+    public string? Problem { get; init; }
+
+    /// <summary>
+    /// A host is only "up" if it can also serve the model asked of it. Reachable but
+    /// missing the model is the failure that looks healthiest and isn't.
+    /// </summary>
+    public bool Ok => Configured && Reachable && ModelInstalled;
+}
+
+/// <summary>The state of inference as a whole, for the diagnostics page.</summary>
+public sealed record AiHealth
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>Why inference is off. Null when it is on.</summary>
+    public string? Disabled { get; init; }
+
+    public IReadOnlyList<AiHostHealth> Hosts { get; init; } = [];
+
+    /// <summary>Where a question asked right now would go.</summary>
+    public string? ActiveEndpoint { get; init; }
+
+    public string? ActiveModel { get; init; }
+
+    public bool UsingFallback { get; init; }
+
+    /// <summary>Time left before the preferred host is retried, or null when it is in use.</summary>
+    public TimeSpan? PrimaryCooldownRemaining { get; init; }
+
+    /// <summary>True when at least one host could serve a question.</summary>
+    public bool AnyUp => Hosts.Any(h => h.Ok);
+}
+
+/// <summary>
 /// Talks to the local Ollama server.
 /// <para>
 /// Everything the model returns is untrusted text. Generated SQL is never executed
@@ -60,8 +123,35 @@ public sealed class AiClient
 
     public int MaxSummaryRows => _opt.MaxSummaryRows;
 
-    /// <summary>Shared with the agent, so both describe the same schema.</summary>
+    /// <summary>
+    /// Shared with the agent, so both describe the same schema.
+    /// <para>
+    /// Describes the DATA ONLY. It must never say what shape a reply takes: the two
+    /// callers have different contracts, and this constant is spliced into both. It
+    /// used to carry <see cref="SuggestReplyContract"/>, and the agent inherited it —
+    /// so the agent's prompt told the model to answer with <c>{"action":…}</c> and
+    /// then, later and more emphatically, to reply ONLY with <c>{"sql","notes"}</c>.
+    /// The model followed the second: it never emitted <c>action:"answer"</c>, spent
+    /// its whole step budget querying, and every question ended with no answer and a
+    /// list of SQL. Guarded by SchemaPromptTests.
+    /// </para>
+    /// </summary>
     internal const string SchemaForAgent = SchemaPrompt;
+
+    /// <summary>
+    /// The reply contract for the one-shot NL-to-SQL path, which is the only caller
+    /// that wants <c>{sql, notes}</c>. Kept out of <see cref="SchemaPrompt"/> so it
+    /// cannot reach the agent.
+    /// </summary>
+    private const string SuggestReplyContract =
+        """Reply ONLY with JSON: {"sql": "...", "notes": "one short sentence"}""";
+
+    /// <summary>The system prompt for <see cref="SuggestSqlAsync"/>: contract, then schema.</summary>
+    private const string SuggestSqlPrompt = $"""
+        {SuggestReplyContract}
+
+        {SchemaPrompt}
+        """;
 
     /// <summary>
     /// The schema the model is given. Still kept tight, but no longer for latency:
@@ -70,8 +160,8 @@ public sealed class AiClient
     /// because a shorter schema is one the model follows more reliably.
     /// </summary>
     private const string SchemaPrompt = """
-        You write Microsoft SQL Server (T-SQL) SELECT queries over a Pi-hole DNS warehouse.
-        Reply ONLY with JSON: {"sql": "...", "notes": "one short sentence"}
+        You are querying a Pi-hole DNS warehouse on Microsoft SQL Server, so every
+        query you write is T-SQL.
 
         SCHEMA
         dbo.PiholeQueries(id bigint, ts datetime2 UTC, type int, status int, status_text varchar,
@@ -169,7 +259,7 @@ public sealed class AiClient
         var reply = await WithFailoverAsync((target, token) => PostAsync(new OllamaGenerate
         {
             Model = target.Model,
-            System = SchemaPrompt,
+            System = SuggestSqlPrompt,
             Prompt = question,
             Stream = false,
             Format = "json",
@@ -296,64 +386,134 @@ public sealed class AiClient
         }, cts.Token);
     }
 
-    /// <summary>Availability probe for the diagnostics page.</summary>
-    public async Task<(bool Ok, string Detail)> ProbeAsync(CancellationToken ct = default)
+    /// <summary>
+    /// How long a health probe waits on one host. Deliberately far shorter than
+    /// <see cref="AiOptions.TimeoutSeconds"/>: that budget exists for generation,
+    /// and a diagnostics page that blocks for three minutes on a host that accepted
+    /// the connection and then went quiet is not a diagnostics page. The connect
+    /// itself is already bounded at 5s by the handler registered in Program.cs.
+    /// </summary>
+    public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Availability of every configured inference host, for the diagnostics page.
+    /// <para>
+    /// Both hosts are probed, not just the active one. The whole value of a standby
+    /// is knowing whether it is actually there BEFORE it is needed; a silently broken
+    /// fallback is worse than none, because it reads as cover.
+    /// </para>
+    /// <para>
+    /// The probe never reports its result to <see cref="AiEndpointSelector"/>. It runs
+    /// on a much shorter leash than a real request, so a host that fails the probe may
+    /// still serve a generation, and putting the primary into cooldown on that basis
+    /// would let opening a page degrade the thing it is reporting on.
+    /// </para>
+    /// </summary>
+    public async Task<AiHealth> ProbeAsync(CancellationToken ct = default)
     {
         if (!Enabled)
         {
-            return (false, "Disabled by configuration (Ai:Enabled).");
+            var why = !_opt.Enabled
+                ? "Disabled by configuration (Ai:Enabled is false)."
+                : "No inference endpoint is configured (Ai:Endpoint is empty).";
+            return new AiHealth { Enabled = false, Disabled = why };
         }
 
-        // Probe both hosts rather than only the active one. The whole value of a
-        // standby is knowing whether it is actually there BEFORE it is needed; a
-        // silently broken fallback is worse than none, because it reads as cover.
-        var primary = await ProbeOneAsync(_hosts.Primary, ct);
-        if (_hosts.Fallback is null)
+        // In parallel: the two hosts are independent, and probing them in sequence
+        // means an absent primary adds its whole timeout to the standby's wait.
+        AiTarget[] targets = _hosts.Fallback is { } standby
+            ? [_hosts.Primary, standby]
+            : [_hosts.Primary];
+
+        var hosts = await Task.WhenAll(targets.Select(t => ProbeOneAsync(t, ct)));
+
+        return new AiHealth
         {
-            return primary;
-        }
-
-        var fallback = await ProbeOneAsync(_hosts.Fallback, ct);
-        var cooldown = _hosts.PrimaryCooldownRemaining;
-        var note = cooldown is null
-            ? ""
-            : $" Primary is in cooldown for another {cooldown.Value.TotalSeconds:N0}s, " +
-              "so requests are going to the standby.";
-
-        return (primary.Ok || fallback.Ok,
-                $"Primary: {primary.Detail} Standby: {fallback.Detail}{note}");
+            Enabled = true,
+            Hosts = hosts,
+            ActiveEndpoint = _hosts.Current.Endpoint,
+            ActiveModel = _hosts.Current.Model,
+            UsingFallback = _hosts.Current.IsFallback,
+            PrimaryCooldownRemaining = _hosts.PrimaryCooldownRemaining,
+        };
     }
 
-    private async Task<(bool Ok, string Detail)> ProbeOneAsync(AiTarget target, CancellationToken ct)
+    private async Task<AiHostHealth> ProbeOneAsync(AiTarget target, CancellationToken ct)
     {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(ProbeTimeout);
+
+        var health = new AiHostHealth
+        {
+            Role = target.IsFallback ? "Standby" : "Preferred",
+            Endpoint = target.Endpoint,
+            Model = target.Model,
+        };
+
+        if (!target.IsConfigured)
+        {
+            return health with
+            {
+                Configured = false,
+                Problem = string.IsNullOrWhiteSpace(target.Endpoint)
+                    ? "No address configured."
+                    : $"'{target.Endpoint}' is not an absolute address. It needs the scheme, " +
+                      "e.g. http://10.20.0.139:11434.",
+            };
+        }
+
         try
         {
-            using var resp = await _http.GetAsync(target.Uri("api/tags"), ct);
+            using var resp = await _http.GetAsync(target.Uri("api/tags"), cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
-                return (false, $"{target.Endpoint} returned HTTP {(int)resp.StatusCode}.");
+                return health with
+                {
+                    Problem = $"Answered with HTTP {(int)resp.StatusCode}, so something is " +
+                              "listening but it is not Ollama.",
+                };
             }
 
-            var body = await resp.Content.ReadAsStringAsync(ct);
+            var body = await resp.Content.ReadAsStringAsync(cts.Token);
             using var doc = JsonDocument.Parse(body);
             var models = doc.RootElement.TryGetProperty("models", out var m)
                 ? m.EnumerateArray()
                    .Select(e => e.TryGetProperty("name", out var nm) ? nm.GetString() : null)
-                   .Where(x => x is not null)
+                   .Where(x => !string.IsNullOrWhiteSpace(x))
+                   .Select(x => x!)
+                   .Order(StringComparer.OrdinalIgnoreCase)
                    .ToList()
                 : [];
 
-            var present = models.Any(x =>
-                string.Equals(x, target.Model, StringComparison.OrdinalIgnoreCase));
+            // Ollama reports "qwen2.5-coder:3b"; a config that omits the tag still
+            // resolves to :latest at generation time, so accept that spelling too
+            // rather than reporting a working host as broken.
+            var installed = models.Any(x =>
+                string.Equals(x, target.Model, StringComparison.OrdinalIgnoreCase) ||
+                (!target.Model.Contains(':') &&
+                 string.Equals(x, target.Model + ":latest", StringComparison.OrdinalIgnoreCase)));
 
-            return present
-                ? (true, $"{target.Endpoint} — model '{target.Model}' available.")
-                : (false, $"{target.Endpoint} is reachable but '{target.Model}' is not installed " +
-                          $"(available: {(models.Count == 0 ? "none" : string.Join(", ", models))}).");
+            return health with
+            {
+                Reachable = true,
+                ModelInstalled = installed,
+                InstalledModels = models,
+                Problem = installed
+                    ? null
+                    : $"Reachable, but '{target.Model}' is not installed. Run " +
+                      $"`ollama pull {target.Model}` on that host.",
+            };
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return health with
+            {
+                Problem = $"No answer within {ProbeTimeout.TotalSeconds:N0}s.",
+            };
         }
         catch (Exception ex)
         {
-            return (false, $"{target.Endpoint} unreachable: {ex.Message}");
+            return health with { Problem = ex.Message };
         }
     }
 

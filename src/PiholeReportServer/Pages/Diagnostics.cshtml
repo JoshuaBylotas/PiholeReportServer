@@ -9,7 +9,8 @@
     <h1>Diagnostics</h1>
     <p class="lede">
         What the application sees: your Entra ID session, the identity it presents to
-        SQL Server, and whether the warehouse objects are in place.
+        SQL Server, whether the inference hosts behind the AI features are answering,
+        and whether the warehouse objects are in place.
     </p>
 </div>
 
@@ -63,6 +64,135 @@
         }
     </div>
 </div>
+
+<div class="category-head">
+    <h2>AI inference</h2>
+    <span class="rule"></span>
+</div>
+
+@if (!Model.Ai.Enabled)
+{
+    <div class="notice notice-info">
+        @Model.Ai.Disabled Set <code>Ai:Enabled</code> and <code>Ai:Endpoint</code> to turn
+        the Analyst, Ask and Explain features on.
+    </div>
+}
+else
+{
+    @if (!Model.Ai.AnyUp)
+    {
+        <div class="notice notice-error">
+            <strong>No inference host is answering.</strong> Every AI feature will refuse
+            until one of the hosts below comes back.
+        </div>
+    }
+    else if (Model.Ai.UsingFallback)
+    {
+        <div class="notice notice-warn">
+            The preferred host is in cooldown, so questions are going to the standby
+            (<code>@Model.Ai.ActiveEndpoint</code>, model <code>@Model.Ai.ActiveModel</code>).
+            @if (Model.Ai.PrimaryCooldownRemaining is { } left)
+            {
+                <text>The preferred host is retried in @(left.TotalSeconds.ToString("N0"))s; recovery is automatic.</text>
+            }
+        </div>
+    }
+
+    <div class="table-wrap">
+        <table class="data">
+            <thead>
+                <tr>
+                    <th>Host</th><th>Endpoint</th><th>Model</th><th>Status</th><th>Detail</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var host in Model.Ai.Hosts)
+                {
+                    <tr>
+                        <td>
+                            @host.Role
+                            @if (host.Endpoint == Model.Ai.ActiveEndpoint)
+                            {
+                                <span class="badge badge-pine">Serving</span>
+                            }
+                        </td>
+                        <td class="mono nowrap">@(string.IsNullOrWhiteSpace(host.Endpoint) ? "—" : host.Endpoint)</td>
+                        <td class="mono nowrap">@host.Model</td>
+                        <td>
+                            @if (host.Ok)
+                            {
+                                <span class="badge badge-pine">Up</span>
+                            }
+                            else if (!host.Configured)
+                            {
+                                <span class="badge badge-gold">Not configured</span>
+                            }
+                            else if (host.Reachable)
+                            {
+                                <span class="badge badge-gold">Model missing</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-gold">Unreachable</span>
+                            }
+                        </td>
+                        <td class="small">
+                            @if (host.Problem is not null)
+                            {
+                                <span>@host.Problem</span>
+                            }
+                            else
+                            {
+                                <span class="muted">Answering, with the model installed.</span>
+                            }
+                            @if (host.InstalledModels.Count > 0 && !host.ModelInstalled)
+                            {
+                                <div class="small muted" style="margin-top:.35rem">
+                                    Installed: @string.Join(", ", host.InstalledModels)
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <p class="small muted" style="margin-top:.75rem">
+        Each host is given @(PiholeReportServer.Services.AiClient.ProbeTimeout.TotalSeconds.ToString("N0"))s
+        to answer <code>GET /api/tags</code>, far less than the
+        generation timeout, so an absent host cannot stall this page. A probe that fails
+        here is not held against the host: it never puts the preferred one into cooldown,
+        because a slow probe would otherwise degrade the very thing it reports on.
+    </p>
+
+    <div class="table-wrap" style="margin-top:1.25rem">
+        <table class="data">
+            <thead>
+                <tr><th>Feature</th><th>Status</th><th>Detail</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var (name, on, detail) in Model.AiFeatures)
+                {
+                    <tr>
+                        <td>@name</td>
+                        <td>
+                            @if (on)
+                            {
+                                <span class="badge badge-pine">Ready</span>
+                            }
+                            else
+                            {
+                                <span class="badge badge-gold">Off</span>
+                            }
+                        </td>
+                        <td class="small">@detail</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
 
 <div class="category-head">
     <h2>Warehouse objects</h2>
