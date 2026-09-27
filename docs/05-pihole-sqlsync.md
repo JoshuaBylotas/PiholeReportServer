@@ -20,9 +20,20 @@ FTL queries view ──► sync.py ──► dbo.PiholeQueries
 1. On start, ask SQL Server for `ISNULL(MAX(id), 0)`. That is the watermark; no local
    state to lose.
 2. `SELECT … FROM queries WHERE id > @watermark ORDER BY id LIMIT @batch`
-3. Transform: unix timestamp → UTC `datetime`, status code → label.
+3. Transform: unix timestamp → UTC `datetime`, status code → label. Also looks up
+   each row's client IP against FTL's own `network`/`network_addresses` tables
+   (read locally, no network call) and stamps `client_mac`, `client_hostname`,
+   `client_vendor` — the device's identity **as it was at that instant**. See
+   [Device names and the DNS push](09-device-names-and-dns.md#point-in-time-client-attribution)
+   for why: `dbo.DimClient` is a daily snapshot keyed by IP, and DHCP reassigns
+   IPs, so anything resolved against it after the fact can attribute a query to
+   the wrong device.
 4. `executemany` INSERT in one transaction; commit; advance the watermark.
 5. Repeat until caught up, then sleep `--interval` seconds and poll again.
+6. Also checks whether any newly-seen `client_mac` still has no good name in
+   `dbo.vDeviceName` and, if so, asks the Omada Controller directly for that one
+   MAC (`omada_lookup.py`) — throttled to once an hour per MAC, and a no-op until
+   `/etc/pihole-sqlsync/omada.json` exists.
 
 Because the destination has a primary key on FTL's `id`, re-running can never duplicate
 rows. Because the watermark is read from the destination, a crash loses nothing.
@@ -57,7 +68,13 @@ sudo pip3 install --break-system-packages pymssql
 sudo mkdir -p /opt/pihole-sqlsync /etc/pihole-sqlsync
 sudo install -o pihole -g pihole -m 0755 sync.py /opt/pihole-sqlsync/sync.py
 sudo install -o pihole -g pihole -m 0755 dims.py /opt/pihole-sqlsync/dims.py
+sudo install -o pihole -g pihole -m 0755 omada_lookup.py /opt/pihole-sqlsync/omada_lookup.py
 ```
+
+`omada_lookup.py` is optional at this point — `sync.py` imports it but disables itself
+cleanly if `/etc/pihole-sqlsync/omada.json` doesn't exist yet. See
+[Device names and the DNS push](09-device-names-and-dns.md#on-demand-omada-lookup)
+for how to create that credential.
 
 ### 3. Configuration
 

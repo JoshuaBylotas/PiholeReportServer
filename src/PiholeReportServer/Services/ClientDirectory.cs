@@ -2,11 +2,19 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace PiholeReportServer.Services;
 
-public sealed record ClientEntry(string Ip, string? Name, string? MacVendor)
+public sealed record ClientEntry(string Ip, string? Mac, string? Name, string? MacVendor)
 {
     /// <summary>What the picker shows. Falls back to the IP when the device has no name.</summary>
     public string Label =>
         string.IsNullOrWhiteSpace(Name) ? Ip : $"{Name} ({Ip})";
+
+    /// <summary>
+    /// What the picker's <c>&lt;option value&gt;</c> should be. A MAC is a stable
+    /// identity across a DHCP reassignment - see docs/09 - so it is preferred
+    /// wherever the device has one; the IP is a fallback only for the rare
+    /// device FTL never associated a MAC with.
+    /// </summary>
+    public string Value => string.IsNullOrWhiteSpace(Mac) ? Ip : Mac;
 }
 
 /// <summary>
@@ -37,7 +45,7 @@ public sealed class ClientDirectory
     // AD DNS before FTL's reverse DNS, and is never null, so the ordering below no
     // longer has to special-case a missing name.
     private const string Sql = """
-        SELECT dc.ip, dc.display_name AS name, dc.mac_vendor
+        SELECT dc.ip, dc.mac, dc.display_name AS name, dc.mac_vendor
         FROM dbo.vClient AS dc
         ORDER BY CASE WHEN dc.name_source = 'ip' THEN 1 ELSE 0 END,
                  dc.display_name,
@@ -77,7 +85,8 @@ public sealed class ClientDirectory
                 .Select(r => new ClientEntry(
                     r[0]!.ToString()!,
                     r[1]?.ToString(),
-                    r[2]?.ToString())));
+                    r[2]?.ToString(),
+                    r[3]?.ToString())));
         }
         catch (Exception ex)
         {

@@ -75,7 +75,7 @@
       "category": "Clients",
       "order": 20,
       "parameters": [
-        { "name": "client", "label": "Client IP", "kind": "Text", "help": "Exact IP, e.g. 192.0.2.122" },
+        { "name": "client", "label": "Client MAC or IP", "kind": "Text", "help": "Prefer the MAC (aa:bb:cc:dd:ee:ff) - it stays correct across a DHCP reassignment, unlike an IP. An IP is matched too, for a device with no known MAC." },
         { "name": "from", "label": "From", "kind": "DateTime", "default": "-24h" },
         { "name": "to", "label": "To", "kind": "DateTime", "default": "now" },
         { "name": "top", "label": "Rows", "kind": "Int", "default": "200" }

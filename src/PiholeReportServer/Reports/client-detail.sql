@@ -10,7 +10,11 @@ SELECT TOP (@top)
 FROM dbo.PiholeQueries AS q
      LEFT JOIN dbo.DimStatus AS ds ON ds.status = q.status
      LEFT JOIN dbo.DimType   AS dt ON dt.type   = q.type
-WHERE q.client = @client
+-- client_mac is the stable identity (see docs/09, "point-in-time client
+-- attribution") - a device keeps its MAC across a DHCP reassignment, which
+-- its IP does not. The IP match is kept only so a value copied from an older
+-- bookmark, or a device with no known MAC, still resolves to something.
+WHERE (q.client_mac = @client OR q.client = @client)
   AND q.ts >= @from
   AND q.ts <  @to
 GROUP BY q.domain, q.status_text, ds.status_text, q.type, dt.type_text

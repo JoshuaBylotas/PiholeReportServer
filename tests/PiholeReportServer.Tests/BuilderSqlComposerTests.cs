@@ -88,17 +88,18 @@ public class BuilderSqlComposerTests
     [Fact]
     public void Dimension_joins_are_only_added_when_needed()
     {
-        // The client join is dbo.vClient, which resolves the device name from the
-        // Omada controller and AD DNS before FTL's reverse DNS. Asserting on the
-        // alias rather than the object name keeps this about "is the join added",
-        // which is what the test is for.
+        // The client join is dbo.vDeviceName, keyed by client_mac - the row's own
+        // point-in-time identity (docs/09) - rather than dbo.vClient by IP, which
+        // resolves the device name from the Omada controller and AD DNS before
+        // FTL's reverse DNS. Asserting on the alias rather than the object name
+        // keeps this about "is the join added", which is what the test is for.
         var plain = BuilderSqlComposer.Compose(
             new BuilderSpec { GroupBy = GroupDimension.Domain }, 5000);
         Assert.DoesNotContain("AS dc ON", plain.Sql);
 
         var withHostname = BuilderSqlComposer.Compose(
             new BuilderSpec { GroupBy = GroupDimension.ClientHostname }, 5000);
-        Assert.Contains("dbo.vClient AS dc ON", withHostname.Sql);
+        Assert.Contains("dbo.vDeviceName AS dc ON", withHostname.Sql);
         Assert.DoesNotContain("dbo.DimClient", withHostname.Sql);
     }
 

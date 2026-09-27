@@ -105,7 +105,7 @@
                 <select asp-for="Spec.ClientIps" multiple size="6" class="multi">
                     @foreach (var c in Model.ClientList.Clients)
                     {
-                        <option value="@c.Ip" title="@c.MacVendor">@c.Label</option>
+                        <option value="@c.Value" title="@c.MacVendor">@c.Label</option>
                     }
                 </select>
                 <span class="help">

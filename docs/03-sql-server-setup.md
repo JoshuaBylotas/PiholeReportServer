@@ -164,6 +164,14 @@ CREATE TABLE dbo.PiholeQueries
     reply_time  float         NULL,       -- seconds
     dnssec      int           NULL,
     ede         int           NULL,
+
+    -- The device that made this query, as it was known AT INGEST TIME - not
+    -- resolved later against whatever currently holds `client`'s address.
+    -- See tools/schema/QueryClientAttribution.sql and docs/09.
+    client_mac      varchar(32)  NULL,
+    client_hostname varchar(255) NULL,   -- FTL's raw name at that instant, unfiltered
+    client_vendor   varchar(128) NULL,
+
     CONSTRAINT PK_PiholeQueries PRIMARY KEY CLUSTERED (id)
 );
 GO
@@ -171,6 +179,11 @@ GO
 
 The primary key on `id` is what makes the loader idempotent: a re-run cannot duplicate
 rows, and the watermark is simply `MAX(id)`.
+
+`client_mac` is what every client-facing report should filter and group on. `client`
+(the raw IP) is kept only as ingested, unmodified — useful for diagnosing DHCP churn,
+never for identifying a device across a date range. See
+[Device names and the DNS push](09-device-names-and-dns.md#point-in-time-client-attribution).
 
 ### Indexes
 

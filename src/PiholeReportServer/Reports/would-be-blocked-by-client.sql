@@ -8,8 +8,11 @@
 -- rather than a join to dbo.GravityDomains because that table holds one row per
 -- (domain, adlist) pair -- joining it directly would multiply the row counts by
 -- the number of lists a domain appears on.
+-- Grouped by client_mac, not the raw IP - see docs/09, "point-in-time client
+-- attribution". Rows ingested before that migration have no client_mac and
+-- fall under NULL, distinct from any real device.
 WITH flagged AS (
-    SELECT q.client,
+    SELECT q.client_mac, q.client_vendor,
            CASE WHEN EXISTS (SELECT 1
                              FROM dbo.GravityDomains AS gd
                              WHERE gd.domain = q.domain)
@@ -19,19 +22,20 @@ WITH flagged AS (
       AND q.ts <  @to
 ),
 totals AS (
-    SELECT client,
-           COUNT_BIG(*)      AS total_queries,
-           SUM(on_blocklist) AS blocklist_queries
+    SELECT client_mac,
+           MAX(client_vendor) AS vendor,
+           COUNT_BIG(*)       AS total_queries,
+           SUM(on_blocklist)  AS blocklist_queries
     FROM flagged
-    GROUP BY client
+    GROUP BY client_mac
 )
-SELECT t.client                              AS ip,
-       COALESCE(dc.name, '(unknown)')        AS hostname,
-       COALESCE(dc.mac_vendor, '')           AS vendor,
+SELECT t.client_mac                          AS mac,
+       COALESCE(dn.name, '(unknown)')        AS hostname,
+       COALESCE(t.vendor, '')                AS vendor,
        t.total_queries,
        t.blocklist_queries,
        CAST(100.0 * t.blocklist_queries
             / NULLIF(t.total_queries, 0) AS decimal(5,2)) AS blocklist_pct
 FROM totals AS t
-     LEFT JOIN dbo.DimClient AS dc ON dc.ip = t.client
+     LEFT JOIN dbo.vDeviceName AS dn ON dn.mac = t.client_mac
 ORDER BY t.blocklist_queries DESC;

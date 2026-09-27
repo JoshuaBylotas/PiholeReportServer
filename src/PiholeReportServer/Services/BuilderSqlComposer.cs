@@ -26,11 +26,20 @@ public static class BuilderSqlComposer
     private static readonly Dictionary<GroupDimension, Dimension> Dimensions = new()
     {
         [GroupDimension.Domain]         = new("q.domain", "domain"),
-        [GroupDimension.Client]         = new("q.client", "client"),
-        // display_name, not dc.name: the view resolves the name from the Omada
-        // controller and AD DNS before falling back to FTL's reverse DNS, which is
-        // what gave 34 different devices the name ALIEN01.
-        [GroupDimension.ClientHostname] = new("dc.display_name", "client_name"),
+        // client_mac, not q.client: q.client is the raw IP as it was at query
+        // time, and DHCP reassigns IPs. Grouping by client_mac is what makes
+        // this stable across a reassignment - see docs/09,
+        // "point-in-time client attribution". Rows ingested before that
+        // migration have no client_mac and group under NULL; they age out of
+        // the default report window quickly.
+        [GroupDimension.Client]         = new("q.client_mac", "client"),
+        // dbo.vDeviceName, not dbo.vClient: the view resolves the name from
+        // the Omada controller and AD DNS before falling back to FTL's
+        // reverse DNS, which is what gave 34 different devices the name
+        // ALIEN01. Joined by client_mac (the row's own point-in-time
+        // identity), not by IP, so the display name is not itself at the
+        // mercy of whoever holds that IP today.
+        [GroupDimension.ClientHostname] = new("COALESCE(dc.name, q.client_mac, q.client)", "client_name"),
         [GroupDimension.QueryType]      = new("COALESCE(dt.type_text, CONCAT('type ', q.type))", "query_type"),
         [GroupDimension.Status]         = new("COALESCE(ds.status_text, q.status_text)", "status"),
         [GroupDimension.Upstream]       = new("COALESCE(q.forward, '(cache or blocked)')", "upstream"),
@@ -44,7 +53,7 @@ public static class BuilderSqlComposer
     {
         [MetricKind.QueryCount]       = new("COUNT_BIG(*)", "queries"),
         [MetricKind.DistinctDomains]  = new("COUNT(DISTINCT q.domain)", "distinct_domains"),
-        [MetricKind.DistinctClients]  = new("COUNT(DISTINCT q.client)", "distinct_clients"),
+        [MetricKind.DistinctClients]  = new("COUNT(DISTINCT q.client_mac)", "distinct_clients"),
         [MetricKind.AvgReplyMs]       = new("CAST(AVG(NULLIF(q.reply_time, 0)) * 1000 AS decimal(10,2))", "avg_reply_ms"),
         [MetricKind.MaxReplyMs]       = new("CAST(MAX(q.reply_time) * 1000 AS decimal(10,2))", "max_reply_ms"),
     };
@@ -91,7 +100,7 @@ public static class BuilderSqlComposer
 
         if (needsClientDim)
         {
-            sb.AppendLine("     LEFT JOIN dbo.vClient AS dc ON dc.ip = q.client");
+            sb.AppendLine("     LEFT JOIN dbo.vDeviceName AS dc ON dc.mac = q.client_mac");
         }
         if (needsTypeDim)
         {
@@ -121,14 +130,22 @@ public static class BuilderSqlComposer
         }
         if (!string.IsNullOrWhiteSpace(spec.ClientFilter))
         {
-            where.Add("q.client LIKE @clientFilter");
+            // Free text can be an IP fragment or a hostname fragment; a MAC is
+            // never typed by hand here, so this only ever needs the two raw
+            // per-row columns, not client_mac.
+            where.Add("(q.client LIKE @clientFilter OR q.client_hostname LIKE @clientFilter)");
             p["clientFilter"] = $"%{Escape(spec.ClientFilter)}%";
         }
 
-        // Multi-select client picker. Only the parameter *names* are generated
-        // (from an index), never the values, so the selection cannot inject SQL
-        // however the form is tampered with. Capped so a hand-crafted post
-        // cannot build a pathological IN list.
+        // Multi-select client picker. The picker (ClientDirectory) offers a
+        // MAC when the device has one and an IP only as a last resort, so a
+        // selected value can be either shape - split on that shape here and
+        // match each against the column it actually identifies (client_mac
+        // for a MAC, the raw client IP for anything without one). Only the
+        // parameter *names* are generated (from an index), never the values,
+        // so the selection cannot inject SQL however the form is tampered
+        // with. Capped so a hand-crafted post cannot build a pathological IN
+        // list.
         var chosenClients = spec.ClientIps
             .Where(c => !string.IsNullOrWhiteSpace(c))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -137,14 +154,26 @@ public static class BuilderSqlComposer
 
         if (chosenClients.Count > 0)
         {
-            var placeholders = new List<string>(chosenClients.Count);
+            var macPlaceholders = new List<string>();
+            var ipPlaceholders = new List<string>();
             for (var i = 0; i < chosenClients.Count; i++)
             {
+                var value = chosenClients[i];
                 var name = $"cli{i}";
-                placeholders.Add($"@{name}");
-                p[name] = chosenClients[i];
+                p[name] = value;
+                (IsMacShaped(value) ? macPlaceholders : ipPlaceholders).Add($"@{name}");
             }
-            where.Add($"q.client IN ({string.Join(", ", placeholders)})");
+
+            var clauses = new List<string>();
+            if (macPlaceholders.Count > 0)
+            {
+                clauses.Add($"q.client_mac IN ({string.Join(", ", macPlaceholders)})");
+            }
+            if (ipPlaceholders.Count > 0)
+            {
+                clauses.Add($"q.client IN ({string.Join(", ", ipPlaceholders)})");
+            }
+            where.Add($"({string.Join(" OR ", clauses)})");
         }
         if (!string.IsNullOrWhiteSpace(spec.DomainFilter))
         {
@@ -215,4 +244,9 @@ public static class BuilderSqlComposer
     /// </summary>
     private static string Escape(string s) =>
         s.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]");
+
+    private static readonly System.Text.RegularExpressions.Regex MacShape =
+        new(@"^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private static bool IsMacShaped(string value) => MacShape.IsMatch(value);
 }
