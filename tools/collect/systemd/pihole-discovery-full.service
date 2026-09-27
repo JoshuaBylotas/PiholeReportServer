@@ -1,0 +1,10 @@
+[Unit]
+Description=Device name discovery including service and OS fingerprinting
+After=network-online.target avahi-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /opt/pihole-discovery/discover_network.py
+TimeoutStartSec=3600

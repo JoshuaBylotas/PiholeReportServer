@@ -172,14 +172,15 @@ Entra tokens at all, and this permission will not change that.
 
 Two roles separate reading from arbitrary querying.
 
-**App roles** → **Create app role**, twice:
+**App roles** → **Create app role**, three times:
 
 | Display name | Value | Allowed member types | Description |
 |--------------|-------|----------------------|-------------|
 | Report Viewer | `Report.Viewer` | Users/Groups | Browse and run reports and the guided builder |
 | SQL Author | `Report.SqlAuthor` | Users/Groups | Additionally run free-text SQL in the query console |
+| Device Editor | `Report.DeviceEditor` | Users/Groups | State device names in the Devices editor and queue a DNS push |
 
-Or declare both at once by editing the **Manifest**:
+Or declare them at once by editing the **Manifest**:
 
 ```jsonc
 "appRoles": [
@@ -198,12 +199,26 @@ Or declare both at once by editing the **Manifest**:
     "value": "Report.SqlAuthor",
     "id": "9b2c5e10-8a34-4d6f-b7e1-0c3f9a6d2b58",
     "isEnabled": true
+  },
+  {
+    "allowedMemberTypes": [ "User" ],
+    "displayName": "Device Editor",
+    "description": "May state device names in the Devices editor and queue a push of those names to AD DNS.",
+    "value": "Report.DeviceEditor",
+    "id": "52d1e5d0-cff4-455e-8f37-edc3f150fdc6",
+    "isEnabled": true
   }
 ]
 ```
 
 > The two `id` GUIDs must be unique within the application but are otherwise arbitrary.
 > Generate your own with `[guid]::NewGuid()` if you prefer.
+
+`Report.DeviceEditor` is separate from both, and not implied by either. Viewer and
+SqlAuthor read; this one changes what the network's name resolution says, which is
+felt by every device on it. The Devices page is readable by any viewer - "what is
+10.20.0.152" is a reporting question - and checks this role only on its write
+handlers. See docs/09-device-names-and-dns.md.
 
 `Report.SqlAuthor` is deliberately **not** a superset of `Report.Viewer` in the
 manifest — the `Viewer` policy in `Program.cs` accepts *either* role, so a SQL author
@@ -255,7 +270,7 @@ roles exist. Once roles are assigned, switch it on:
 | `RequireAppRoles` | Effect |
 |-------------------|--------|
 | `false` (default) | Any authenticated tenant user is treated as a viewer. The SQL console still requires `Report.SqlAuthor`. |
-| `true` | A viewer must hold `Report.Viewer` **or** `Report.SqlAuthor`. Everyone else gets 403. |
+| `true` | A viewer must hold `Report.Viewer` **or** `Report.SqlAuthor`. Everyone else gets 403. Editing devices additionally needs `Report.DeviceEditor`. |
 
 > Leaving this `false` in production means every account in your tenant can read your
 > DNS history. Set it to `true` once assignments are in place.

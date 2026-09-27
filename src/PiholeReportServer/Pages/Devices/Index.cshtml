@@ -1,0 +1,325 @@
+@page "/Devices"
+@model PiholeReportServer.Pages.Devices.IndexModel
+@{
+    ViewData["Title"] = "Devices";
+
+    string SourceBadge(string source) => source switch
+    {
+        "manual" => "badge-gold",
+        "omada" or "kasa" => "badge-pine",
+        _ => "badge",
+    };
+
+    // Said plainly, because "omadadhcp" means nothing to anyone reading a table.
+    string SourceWords(string source) => source switch
+    {
+        "manual" => "stated here",
+        "omada" => "typed in the controller",
+        "kasa" => "Kasa app alias",
+        "mdns" => "published over mDNS",
+        "ssdp" => "UPnP friendly name",
+        "snmp" => "SNMP sysName",
+        "netbios" => "NetBIOS name",
+        "addns" => "AD DNS A record",
+        "omadadhcp" => "announced at DHCP",
+        "nmap" => "reverse DNS",
+        "ftl" => "Pi-hole reverse DNS",
+        "none" => "nothing usable",
+        _ => source,
+    };
+}
+
+<div class="page-head">
+    <span class="eyebrow">Source of truth</span>
+    <h1>Devices</h1>
+    <p class="lede">
+        One row per MAC: what it is called, where it is now, and which source says so.
+        A name stated here outranks every other source and is what gets published to
+        AD DNS.
+    </p>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.StatusMessage))
+{
+    <div class="notice notice-info">@Model.StatusMessage</div>
+}
+@if (!string.IsNullOrEmpty(Model.ErrorMessage))
+{
+    <div class="notice notice-error">@Model.ErrorMessage</div>
+}
+@if (!Model.CanEdit)
+{
+    <div class="notice notice-warn">
+        You can read this table but not change it. Stating a device name requires the
+        <code>Report.DeviceEditor</code> role.
+    </div>
+}
+
+<div class="stat-strip">
+    <div class="stat"><strong>@Model.Rows.Count</strong><span>devices</span></div>
+    <div class="stat"><strong>@Model.StatedCount</strong><span>named by you</span></div>
+    <div class="stat"><strong>@Model.NeedsReviewCount</strong><span>need review</span></div>
+    <div class="stat"><strong>@Model.DisagreeCount</strong><span>disagree with DNS</span></div>
+</div>
+
+<div class="result-toolbar">
+    <a class="btn btn-ghost btn-compact @(Model.OnlyReview ? "" : "btn-secondary")"
+       asp-route-review="false">All devices</a>
+    <a class="btn btn-ghost btn-compact @(Model.OnlyReview ? "btn-secondary" : "")"
+       asp-route-review="true">Needs review (@Model.NeedsReviewCount)</a>
+
+    <span class="spacer"></span>
+
+    @if (Model.CanEdit)
+    {
+        <form method="post" asp-page-handler="Push" class="row" style="gap:.5rem;align-items:center">
+            <input type="hidden" name="review" value="@Model.OnlyReview.ToString().ToLowerInvariant()" />
+            <button class="btn btn-secondary btn-compact" name="dryRun" value="true"
+                    title="Work out every change and record it, without touching DNS">
+                Dry run
+            </button>
+            <button class="btn btn-primary btn-compact" name="dryRun" value="false"
+                    onclick="return confirm('Publish every stated name to AD DNS? This edits A and PTR records, and removes other names pointing at the same address.');">
+                Push to DNS
+            </button>
+        </form>
+    }
+</div>
+
+<p class="small muted">
+    The push is performed by the agent on WINAD02, not by this site &mdash; so a request
+    is queued here and completes a moment later. Start with a dry run: it records exactly
+    what it would change, and changes nothing.
+</p>
+
+<div class="table-wrap">
+    <table class="data">
+        <thead>
+            <tr>
+                <th>Device</th>
+                <th>Current IP</th>
+                <th>Vendor / model</th>
+                <th>AD DNS</th>
+                <th>Name it</th>
+            </tr>
+        </thead>
+        <tbody>
+        @foreach (var row in Model.Rows)
+        {
+            var cands = Model.Candidates.TryGetValue(row.Mac, out var list) ? list : [];
+            var inputId = "n_" + row.Mac.Replace(":", "");
+            <tr>
+                <td>
+                    <strong>@(row.DeviceName ?? "(unnamed)")</strong><br />
+                    <span class="badge @SourceBadge(row.NameSource)" title="@row.NameSource">
+                        @SourceWords(row.NameSource)
+                    </span>
+                    @if (row.NeedsReview)
+                    {
+                        <span class="badge" title="No stated name, and nothing better than the device's own account of itself">review</span>
+                    }
+                    <br />
+                    <code class="small muted">@row.Mac</code>
+                    @if (row.StatedBy is not null)
+                    {
+                        <br /><span class="small muted">stated by @row.StatedBy</span>
+                    }
+                </td>
+
+                <td>
+                    @if (row.CurrentIp is null)
+                    {
+                        <span class="muted">&mdash;</span>
+                    }
+                    else
+                    {
+                        <code>@row.CurrentIp</code>
+                        <br />
+                        <span class="small muted">
+                            @SourceWords(row.IpSource ?? "") @(row.IpObservedUtc is null
+                                ? "" : $"· {row.IpObservedUtc:MM-dd HH:mm}Z")
+                        </span>
+                    }
+                </td>
+
+                <td class="small">
+                    @(row.Vendor ?? "—")
+                    @if (row.DeviceType is not null)
+                    {
+                        <br /><span class="muted">@row.DeviceType</span>
+                    }
+                </td>
+
+                <td class="small">
+                    @if (row.AdDnsName is null)
+                    {
+                        <span class="muted">no A record</span>
+                    }
+                    else
+                    {
+                        <code>@row.AdDnsName</code>
+                        <br /><code class="muted">@row.AdDnsIp</code>
+                        @if (row.AdDnsAgrees == false)
+                        {
+                            <br /><span class="badge" title="The zone and this table disagree on the name or the address">stale</span>
+                        }
+                    }
+                </td>
+
+                <td>
+                    @if (Model.CanEdit)
+                    {
+                        @if (cands.Count > 0)
+                        {
+                            <div class="row" style="flex-wrap:wrap;gap:.3rem;margin-bottom:.4rem">
+                                @foreach (var c in cands.Take(6))
+                                {
+                                    <button type="button" class="chip" data-fill="@inputId"
+                                            data-value="@c.Name"
+                                            title="@SourceWords(c.Source)@(c.Ip is null ? "" : $" · {c.Ip}")">
+                                        @c.Name
+                                    </button>
+                                }
+                            </div>
+                        }
+
+                        <form method="post" asp-page-handler="Save" class="row" style="gap:.4rem;flex-wrap:wrap">
+                            <input type="hidden" name="mac" value="@row.Mac" />
+                            <input type="hidden" name="review" value="@Model.OnlyReview.ToString().ToLowerInvariant()" />
+                            <input type="text" id="@inputId" name="name" value="@row.DeviceName"
+                                   maxlength="63" placeholder="host name"
+                                   pattern="[0-9A-Za-z_][0-9A-Za-z_-]*[0-9A-Za-z_]|[0-9A-Za-z_]"
+                                   title="Letters, digits, hyphen or underscore. No dots - the zone is added when it is published."
+                                   required />
+                            <input type="text" name="notes" value="@row.Notes"
+                                   maxlength="400" placeholder="note (optional)" style="min-width:8rem" />
+                            <label class="checkline small" title="Publish this device to AD DNS">
+                                <input type="checkbox" name="publishDns" value="true"
+                                       checked="@(row.IsStated ? row.PublishDns : true)" />
+                                DNS
+                            </label>
+                            <button class="btn btn-primary btn-compact" type="submit">Save</button>
+                        </form>
+
+                        @if (row.IsStated)
+                        {
+                            <form method="post" asp-page-handler="Clear" style="margin-top:.3rem">
+                                <input type="hidden" name="mac" value="@row.Mac" />
+                                <input type="hidden" name="review" value="@Model.OnlyReview.ToString().ToLowerInvariant()" />
+                                <button class="btn btn-link small" type="submit"
+                                        onclick="return confirm('Withdraw the stated name? The device falls back to whatever the sources say.');">
+                                    withdraw
+                                </button>
+                            </form>
+                        }
+                    }
+                    else
+                    {
+                        <span class="small muted">
+                            @(cands.Count) candidate name@(cands.Count == 1 ? "" : "s")
+                        </span>
+                    }
+                </td>
+            </tr>
+        }
+        </tbody>
+    </table>
+</div>
+
+@if (Model.RecentPushes.Count > 0)
+{
+    <div class="category-head">
+        <h2>DNS pushes</h2>
+        <span class="rule"></span>
+    </div>
+
+    <div class="table-wrap">
+        <table class="data">
+            <thead>
+                <tr>
+                    <th>#</th><th>Scope</th><th>Mode</th><th>Status</th>
+                    <th>Changed</th><th>Failed</th><th>Requested</th><th>Agent</th><th></th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var p in Model.RecentPushes)
+            {
+                <tr>
+                    <td>@p.Id</td>
+                    <td class="small">@(p.Mac ?? "all publishable")</td>
+                    <td class="small">@(p.DryRun ? "dry run" : "push")</td>
+                    <td>
+                        <span class="badge @(p.Status == "failed" ? "" : p.Status == "done" ? "badge-pine" : "badge-gold")">
+                            @p.Status
+                        </span>
+                    </td>
+                    <td>@(p.RecordsChanged?.ToString() ?? "—")</td>
+                    <td>@(p.RecordsFailed?.ToString() ?? "—")</td>
+                    <td class="small muted">@p.RequestedUtc.ToString("MM-dd HH:mm")Z by @(p.RequestedByName ?? "?")</td>
+                    <td class="small muted">@(p.AgentHost ?? "—")</td>
+                    <td><a class="btn-link small" asp-route-log="@p.Id" asp-route-review="@Model.OnlyReview">log</a></td>
+                </tr>
+                @if (!string.IsNullOrWhiteSpace(p.Message))
+                {
+                    <tr><td colspan="9" class="small muted">@p.Message</td></tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+}
+
+@if (Model.LastPushLog.Count > 0)
+{
+    <div class="category-head">
+        <h2>What request #@Model.ShowLogFor did</h2>
+        <span class="rule"></span>
+        <span class="small muted">@Model.LastPushLog.Count record@(Model.LastPushLog.Count == 1 ? "" : "s")</span>
+    </div>
+
+    <div class="table-wrap">
+        <table class="data">
+            <thead>
+                <tr><th>Action</th><th>Type</th><th>Record</th><th>Address</th><th>Zone</th><th>Detail</th></tr>
+            </thead>
+            <tbody>
+            @foreach (var l in Model.LastPushLog)
+            {
+                <tr>
+                    <td>
+                        <span class="badge @(l.Action switch
+                                             {
+                                                 "added" or "updated" => "badge-pine",
+                                                 "removed" => "badge-gold",
+                                                 "failed" => "",
+                                                 _ => "",
+                                             })">@l.Action</span>
+                    </td>
+                    <td class="small">@l.RecordType</td>
+                    <td class="small"><code>@(l.RecordName ?? "—")</code></td>
+                    <td class="small"><code>@(l.Ip ?? "—")</code></td>
+                    <td class="small muted">@(l.Zone ?? "—")</td>
+                    <td class="small muted">@(l.Detail ?? "")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+}
+
+@section Scripts {
+    <script>
+        // Clicking a candidate fills the name box rather than submitting, so the
+        // choice can still be edited - "Xerox-R-C230-Color-Printer" is a starting
+        // point, not usually the final answer.
+        document.addEventListener('click', function (e) {
+            var chip = e.target.closest('[data-fill]');
+            if (!chip) { return; }
+            var box = document.getElementById(chip.getAttribute('data-fill'));
+            if (box) {
+                box.value = chip.getAttribute('data-value');
+                box.focus();
+            }
+        });
+    </script>
+}

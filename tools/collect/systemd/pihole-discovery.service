@@ -1,0 +1,11 @@
+[Unit]
+Description=Discover device names on the LAN into the Pi-hole warehouse
+After=network-online.target avahi-daemon.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Root: an ARP sweep and the SYN/OS probes need raw sockets.
+User=root
+ExecStart=/usr/bin/python3 /opt/pihole-discovery/discover_network.py --no-fingerprint
+TimeoutStartSec=900

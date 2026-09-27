@@ -1,0 +1,165 @@
+<#
+.SYNOPSIS
+    Removes the DNS records whose name is just a MAC address.
+
+.DESCRIPTION
+    The retired OmadaDNSUpdate task wrote a record for every Omada lease using
+    the controller's client name, which for IoT devices is frequently the
+    device's own MAC. The result was 88 records named like B0-BE-76-B2-C7-22.
+
+    This removes them. It is safe to run only because nothing recreates them any
+    more: the task was unregistered and its replacement publishes only names a
+    person stated.
+
+    WHAT IT REMOVES
+
+      * An A record in the forward zone whose host name is a MAC, in either
+        separator style.
+      * A PTR record whose target's first label is a MAC, in any reverse zone on
+        the server.
+
+    WHAT IT WILL NOT TOUCH
+
+      * A STATIC record - one with no timestamp. A person created it on purpose.
+        No static record should be MAC-named, but the rule is absolute rather
+        than conditional because the cost of being wrong is somebody's alias.
+      * The zone apex, DomainDnsZones, ForestDnsZones, anything under _msdcs.
+      * An address carrying several REAL names. 23 addresses do - JOSHLT01 and
+        XBOX share 10.20.0.231, mac01 and MAC-Mini share 10.20.0.143 - and
+        choosing between two plausible names is a judgement, not a cleanup. The
+        push agent resolves those one at a time as each device is named.
+
+    DRY RUN BY DEFAULT. Nothing is deleted without -Apply.
+
+.PARAMETER Apply
+    Actually delete. Without it, the script only reports.
+
+.EXAMPLE
+    .\Remove-MacShapedRecords.ps1
+    See what would go.
+
+.EXAMPLE
+    .\Remove-MacShapedRecords.ps1 -Apply
+#>
+[CmdletBinding()]
+param(
+    [string]$DnsServer = 'WINAD02',
+    [string]$Zone      = 'bylotas.net',
+    [switch]$Apply
+)
+
+$ErrorActionPreference = 'Stop'
+Import-Module DnsServer -ErrorAction Stop
+
+function Step($m) { Write-Host "`n=== $m ===" -ForegroundColor Cyan }
+function Ok($m)   { Write-Host "  OK   $m" -ForegroundColor Green }
+function Warn($m) { Write-Host "  WARN $m" -ForegroundColor Yellow }
+
+# A name that is only a MAC, either separator style.
+$MacShaped = '^[0-9a-fA-F]{2}([:-][0-9a-fA-F]{2}){5}$'
+$Protected = @('@', 'DomainDnsZones', 'ForestDnsZones', '_msdcs')
+
+$mode = if ($Apply) { 'APPLY' } else { 'DRY RUN' }
+Step "$mode against $Zone on $DnsServer"
+
+# ── Forward zone ────────────────────────────────────────────────────────────
+$all = @(Get-DnsServerResourceRecord -ZoneName $Zone -RRType A -ComputerName $DnsServer)
+$candidates = @($all | Where-Object {
+        $_.HostName -match $MacShaped -and $Protected -notcontains $_.HostName
+    })
+
+$static = @($candidates | Where-Object { -not $_.Timestamp })
+$dynamic = @($candidates | Where-Object { $_.Timestamp })
+
+Write-Host "  $($all.Count) A record(s) in the zone"
+Write-Host "  $($candidates.Count) MAC-shaped"
+if ($static.Count) {
+    Warn "$($static.Count) of them are STATIC and will be left alone:"
+    $static | ForEach-Object { Write-Host "       $($_.HostName) -> $($_.RecordData.IPv4Address)" }
+}
+
+$removedA = 0
+$failedA = 0
+if ($dynamic.Count -eq 0) {
+    Ok 'no dynamic MAC-shaped A records'
+}
+else {
+    Write-Host ''
+    Write-Host ("  {0,-22} {1,-14} {2}" -f 'NAME', 'ADDRESS', 'LAST REFRESHED')
+    foreach ($r in ($dynamic | Sort-Object { $_.RecordData.IPv4Address.IPAddressToString })) {
+        $ip = $r.RecordData.IPv4Address.IPAddressToString
+        Write-Host ("  {0,-22} {1,-14} {2:yyyy-MM-dd HH:mm}" -f $r.HostName, $ip, $r.Timestamp)
+        if ($Apply) {
+            try {
+                Remove-DnsServerResourceRecord -ZoneName $Zone -InputObject $r `
+                    -ComputerName $DnsServer -Force
+                $removedA++
+            }
+            catch {
+                $failedA++
+                Warn "failed $($r.HostName): $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+# ── Reverse zones ───────────────────────────────────────────────────────────
+Step 'Reverse zones'
+$revZones = @(Get-DnsServerZone -ComputerName $DnsServer |
+              Where-Object { $_.IsReverseLookupZone -and -not $_.IsAutoCreated })
+
+$removedPtr = 0
+$failedPtr = 0
+foreach ($z in $revZones) {
+    $ptrs = @(Get-DnsServerResourceRecord -ZoneName $z.ZoneName -RRType Ptr `
+                -ComputerName $DnsServer -ErrorAction SilentlyContinue)
+    $bad = @($ptrs | Where-Object {
+            $target = ($_.RecordData.PtrDomainName -split '\.')[0]
+            $target -match $MacShaped
+        })
+    # Timestamp is NOT a useful signal in a reverse zone here, and treating it
+    # as one skipped every junk record. Aging is off on 0.20.10.in-addr.arpa, so
+    # nothing in it carries a timestamp: all 36 MAC-named PTRs are "static", and
+    # so are 71 of the 134 legitimate ones (router, WINSERVER04, SMART-LOCK).
+    # "Static" there means "written without aging", not "a person meant it".
+    #
+    # So for a PTR the discriminator is the TARGET. A PTR pointing at
+    # E0-D3-62-94-9B-90.bylotas.net is machine-generated by definition - there is
+    # no scenario in which somebody aliases an address to a MAC on purpose. The
+    # forward zone keeps the static rule, where it does carry meaning.
+    $badDynamic = $bad
+
+    Write-Host "  $($z.ZoneName): $($ptrs.Count) PTR, $($bad.Count) MAC-named (removing all of them)"
+    foreach ($r in $badDynamic) {
+        Write-Host ("       .{0,-5} -> {1}" -f $r.HostName, $r.RecordData.PtrDomainName)
+        if ($Apply) {
+            try {
+                Remove-DnsServerResourceRecord -ZoneName $z.ZoneName -InputObject $r `
+                    -ComputerName $DnsServer -Force
+                $removedPtr++
+            }
+            catch {
+                $failedPtr++
+                Warn "failed PTR $($r.HostName): $($_.Exception.Message)"
+            }
+        }
+    }
+}
+
+# ── Summary ─────────────────────────────────────────────────────────────────
+Step 'Summary'
+if ($Apply) {
+    Ok "removed $removedA A record(s) and $removedPtr PTR record(s)"
+    if ($failedA -or $failedPtr) { Warn "$($failedA + $failedPtr) failure(s)" }
+}
+else {
+    $ptrCount = @($revZones | ForEach-Object {
+        $p = @(Get-DnsServerResourceRecord -ZoneName $_.ZoneName -RRType Ptr `
+                 -ComputerName $DnsServer -ErrorAction SilentlyContinue)
+        @($p | Where-Object { ($_.RecordData.PtrDomainName -split '\.')[0] -match $MacShaped }).Count
+    } | Measure-Object -Sum).Sum
+    Write-Host "  would remove $($dynamic.Count) A record(s)"
+    Write-Host "  would remove $ptrCount PTR record(s)"
+    Write-Host ''
+    Write-Host '  Nothing was changed. Re-run with -Apply to delete.' -ForegroundColor Yellow
+}

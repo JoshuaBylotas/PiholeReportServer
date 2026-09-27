@@ -1,0 +1,12 @@
+[Unit]
+Description=Device name discovery, every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+# The sweep is what makes current_ip current, so it matters that this is
+# frequent. The fingerprint pass is not, and is left to the nightly unit.
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

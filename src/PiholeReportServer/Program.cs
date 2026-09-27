@@ -70,6 +70,20 @@ builder.Services.AddAuthorization(options =>
         policy.RequireRole(AppRoles.SqlAuthor);
     });
 
+    // Stating a device name, and pushing it to DNS, is a different power from
+    // reading reports: it changes what name resolution says for every device on
+    // the network. It gets its own role rather than riding on SqlAuthor, which
+    // reads anything and changes nothing.
+    //
+    // The devices page itself stays readable by any viewer - "what is
+    // 10.20.0.152" is a reporting question - and checks this policy only on its
+    // write handlers, so the fallback policy below still governs the GET.
+    options.AddPolicy(AuthorizationPolicies.DeviceEditor, policy =>
+    {
+        policy.RequireAuthenticatedUser();
+        policy.RequireRole(AppRoles.DeviceEditor);
+    });
+
     // Every endpoint requires an authenticated user unless it opts out with
     // [AllowAnonymous]. This is the "whole website is secured by Entra ID"
     // requirement, enforced centrally rather than page by page.
@@ -94,6 +108,10 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ClientDirectory>();
 builder.Services.AddScoped<AdlistDirectory>();
 builder.Services.AddScoped<SavedReportStore>();
+// The device name table and the DNS push queue. Scoped like the other SQL-backed
+// stores - both are thin wrappers over a connection per request.
+builder.Services.AddScoped<DeviceTruthStore>();
+builder.Services.AddScoped<DnsPushStore>();
 // Standing facts for the Analyst - which hostname "Jason's phone" means. Scoped
 // like the other SQL-backed stores; the facts live in the database, not in memory,
 // because being taught something once should survive a recycle.
